@@ -1,0 +1,144 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: kv_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      MONGO_INITDB_DATABASE: kubadilishana_vituo
+    volumes:
+      - mongo_data:/data/db
+      - ./infrastructure/mongodb/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - kv_net
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: kv_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - kv_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: kv_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - kv_net
+
+  auth-service:
+    build: ./services/auth-service
+    container_name: kv_auth_service
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_ALG: HS256
+      JWT_EXPIRE_HOURS: 168
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      - mongodb
+      - mosquitto
+    networks:
+      - kv_net
+
+  user-service:
+    build: ./services/user-service
+    container_name: kv_user_service
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_ALG: HS256
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      - mongodb
+      - mosquitto
+    networks:
+      - kv_net
+
+  location-service:
+    build: ./services/location-service
+    container_name: kv_location_service
+    restart: unless-stopped
+    ports:
+      - "8003:8000"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - kv_net
+
+  match-service:
+    build: ./services/match-service
+    container_name: kv_match_service
+    restart: unless-stopped
+    ports:
+      - "8004:8000"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_ALG: HS256
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      - mongodb
+      - mosquitto
+    networks:
+      - kv_net
+
+  analytics-service:
+    build: ./services/analytics-service
+    container_name: kv_analytics_service
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+    volumes:
+      - ./services/analytics-service/csv_output:/app/csv_output
+    depends_on:
+      - mongodb
+      - mosquitto
+    networks:
+      - kv_net
+
+volumes:
+  mongo_data:
+  mosquitto_data:
+  mosquitto_log:
+  redis_data:
+
+networks:
+  kv_net:
+    driver: bridge
