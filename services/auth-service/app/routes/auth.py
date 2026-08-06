@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 
 from ..core.db import get_db
+from ..core.deps import current_user
 from ..core.security import (
     hash_password, verify_password, create_access_token, normalize_phone
 )
@@ -143,6 +144,26 @@ async def login(body: LoginRequest):
         full_name=user["full_name"],
         access_token=token,
     )
+
+
+@router.get("/me")
+async def me(user=Depends(current_user)):
+    """Return the currently authenticated user's full profile (from JWT)."""
+    return {
+        "user_id": str(user["_id"]),
+        "full_name": user["full_name"],
+        "phone_primary": user["phone_primary"],
+        "phone_alt": user.get("phone_alt"),
+        "category": user["category"],
+        "cadre_code": user["cadre_code"],
+        "cadre_display": user.get("cadre_display", user["cadre_code"]),
+        "subjects": user.get("subjects", []),
+        "current_station": user["current_station"],
+        "desired_destinations": user.get("desired_destinations", []),
+        "status": user.get("status", "active"),
+        "is_verified": user.get("is_verified", False),
+        "created_at": user.get("created_at"),
+    }
 
 
 @router.get("/check-phone/{phone}")
