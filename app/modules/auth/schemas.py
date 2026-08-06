@@ -58,3 +58,13 @@ class LoginResponse(BaseModel):
     full_name: str
     access_token: str
     token_type: str = "bearer"
+
+
+class ForgotPasswordRequest(BaseModel):
+    phone: str
+
+
+class ResetPasswordRequest(BaseModel):
+    phone: str
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=6, max_length=128)

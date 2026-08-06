@@ -1,11 +1,19 @@
-from datetime import datetime, timezone
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 from ...db import get_db
 from ...security import hash_password, verify_password, create_access_token, normalize_phone, current_user
 from ...events.publisher import publish
 from ...events.topics import TOPIC_USER_REGISTERED
-from .schemas import RegisterRequest, RegisterResponse, LoginRequest, LoginResponse
+from .schemas import (
+    RegisterRequest, RegisterResponse, LoginRequest, LoginResponse,
+    ForgotPasswordRequest, ResetPasswordRequest,
+)
+
+logger = logging.getLogger(__name__)
+RESET_CODE_TTL_MINUTES = 15
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -97,6 +105,60 @@ async def me(user=Depends(current_user)):
         "is_verified": user.get("is_verified", False),
         "is_admin": user.get("is_admin", False),
     }
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest):
+    """
+    Issues a 6-digit reset code, saves it hashed with 15-min TTL.
+    DEV: code is logged to backend stdout (view: `docker logs kv_backend`).
+    PROD: integrate with SMS provider (Beem Africa / Africa's Talking).
+    """
+    try:
+        phone = normalize_phone(body.phone)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    db = get_db()
+    user = await db.users.find_one({"phone_primary": phone}, {"_id": 1, "full_name": 1})
+    # Do NOT reveal whether the account exists
+    if user:
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        now = datetime.now(timezone.utc)
+        await db.password_resets.update_one(
+            {"user_id": user["_id"]},
+            {"$set": {
+                "user_id": user["_id"], "phone": phone,
+                "code_hash": hash_password(code),
+                "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
+                "created_at": now, "used": False,
+            }}, upsert=True,
+        )
+        logger.warning(f"🔑 Password reset code for {phone} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
+    return {"ok": True, "message": f"Kama namba ipo, umepata code kwa SMS. Halali dakika {RESET_CODE_TTL_MINUTES}."}
+
+
+@router.post("/reset-password")
+async def reset_password(body: ResetPasswordRequest):
+    try:
+        phone = normalize_phone(body.phone)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db = get_db()
+    user = await db.users.find_one({"phone_primary": phone})
+    if not user:
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    rec = await db.password_resets.find_one({"user_id": user["_id"], "used": False})
+    if not rec:
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    if rec["expires_at"] < datetime.now(timezone.utc):
+        raise HTTPException(400, "Code imekwisha muda — omba mpya")
+    if not verify_password(body.code, rec["code_hash"]):
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
+    await db.password_resets.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
+    logger.info(f"Password reset for {phone}")
+    return {"ok": True, "message": "Password imebadilishwa. Ingia sasa."}
 
 
 @router.get("/check-phone/{phone}")
