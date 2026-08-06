@@ -1,0 +1,90 @@
+from typing import Literal, Optional
+from fastapi import APIRouter, HTTPException, Query
+from ...db import get_db
+from ...cache import cached
+
+router = APIRouter(tags=["locations"])
+
+
+@router.get("/locations/regions")
+async def list_regions():
+    async def _load():
+        cursor = get_db().regions.find({}, {"_id": 0}).sort("name", 1)
+        return [d async for d in cursor]
+    return await cached("locations:regions", _load)
+
+
+@router.get("/locations/regions/{region_id}/districts")
+async def list_districts(region_id: int):
+    async def _load():
+        cursor = get_db().districts.find({"region_id": region_id}, {"_id": 0}).sort("name", 1)
+        return [d async for d in cursor]
+    result = await cached(f"locations:districts:{region_id}", _load)
+    if not result:
+        raise HTTPException(404, "Region not found or has no districts")
+    return result
+
+
+@router.get("/locations/districts/{district_id}/facilities")
+async def list_facilities_in_district(
+    district_id: int,
+    category: Literal["health", "education"] = Query(...),
+    level: Optional[Literal["Primary", "Secondary"]] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(200, le=1000),
+):
+    db = get_db()
+    if category == "education":
+        query = {"district_id": district_id}
+        if level: query["level"] = level
+        if q: query["name"] = {"$regex": q, "$options": "i"}
+        cursor = db.schools.find(query, {"_id": 0, "id": 1, "name": 1, "school_code": 1, "level": 1, "ownership": 1}).sort("name", 1).limit(limit)
+        return [d async for d in cursor]
+
+    district = await db.districts.find_one({"id": district_id}, {"_id": 0, "name": 1})
+    if not district: raise HTTPException(404, "District not found")
+    query = {"district": district["name"]}
+    if q: query["name"] = {"$regex": q, "$options": "i"}
+    cursor = db.health_facilities.find(query, {"_id": 0, "code": 1, "name": 1, "type": 1, "type_category": 1, "ownership_category": 1, "status": 1}).sort("name", 1).limit(limit)
+    return [d async for d in cursor]
+
+
+@router.get("/locations/regions/{region_id}/facilities")
+async def list_facilities_in_region(
+    region_id: int,
+    category: Literal["health", "education"] = Query(...),
+    level: Optional[Literal["Primary", "Secondary"]] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(500, le=2000),
+):
+    db = get_db()
+    if category == "education":
+        query = {"region_id": region_id}
+        if level: query["level"] = level
+        if q: query["name"] = {"$regex": q, "$options": "i"}
+        cursor = db.schools.find(query, {"_id": 0, "id": 1, "name": 1, "school_code": 1, "district_name": 1, "level": 1}).sort("name", 1).limit(limit)
+        return [d async for d in cursor]
+    region = await db.regions.find_one({"id": region_id}, {"_id": 0, "name": 1})
+    if not region: raise HTTPException(404, "Region not found")
+    query = {"region": region["name"]}
+    if q: query["name"] = {"$regex": q, "$options": "i"}
+    cursor = db.health_facilities.find(query, {"_id": 0, "code": 1, "name": 1, "district": 1, "type": 1, "type_category": 1}).sort("name", 1).limit(limit)
+    return [d async for d in cursor]
+
+
+@router.get("/cadres")
+async def list_cadres(category: Optional[Literal["health", "education"]] = Query(None)):
+    key = f"cadres:{category or 'all'}"
+    async def _load():
+        q = {"category": category} if category else {}
+        return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
+    return await cached(key, _load)
+
+
+@router.get("/cadres/subjects")
+async def list_subjects(level: Optional[str] = Query("Secondary")):
+    key = f"subjects:{level or 'all'}"
+    async def _load():
+        q = {"level": level} if level else {}
+        return [d async for d in get_db().subjects.find(q, {"_id": 0}).sort("name", 1)]
+    return await cached(key, _load)
