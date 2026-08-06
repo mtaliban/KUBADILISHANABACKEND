@@ -91,6 +91,43 @@ def _recompute_matches(user_id: str, client: mqtt.Client) -> int:
     return saved
 
 
+def _fanout_match_to_ws(payload: dict) -> None:
+    """When kv/match/found fires, push it via WebSocket to both matched users."""
+    from ..modules.messaging.ws_manager import manager
+    import asyncio
+    db = get_sync_db()
+    a_id = payload.get("user_a_id"); b_id = payload.get("user_b_id")
+    if not (a_id and b_id):
+        return
+    a = db.users.find_one({"_id": ObjectId(a_id)}, {"full_name": 1, "phone_primary": 1, "cadre_display": 1, "current_station": 1})
+    b = db.users.find_one({"_id": ObjectId(b_id)}, {"full_name": 1, "phone_primary": 1, "cadre_display": 1, "current_station": 1})
+    if not (a and b):
+        return
+
+    async def push_both():
+        await manager.send_to_user(a_id, {
+            "event": "match.found", "score": payload.get("score"),
+            "occurred_at": payload.get("occurred_at"),
+            "candidate": {"user_id": str(b["_id"]), "full_name": b["full_name"],
+                          "phone_primary": b["phone_primary"], "cadre_display": b.get("cadre_display"),
+                          "current_station": b.get("current_station")},
+        })
+        await manager.send_to_user(b_id, {
+            "event": "match.found", "score": payload.get("score"),
+            "occurred_at": payload.get("occurred_at"),
+            "candidate": {"user_id": str(a["_id"]), "full_name": a["full_name"],
+                          "phone_primary": a["phone_primary"], "cadre_display": a.get("cadre_display"),
+                          "current_station": a.get("current_station")},
+        })
+
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(push_both())
+        loop.close()
+    except Exception as e:
+        logger.exception(f"fanout match to WS failed: {e}")
+
+
 def _on_connect(client, userdata, flags, rc, props):
     logger.info(f"backend MQTT subscriber connected rc={rc}")
     client.subscribe(TOPIC_ALL, qos=1)
@@ -112,6 +149,14 @@ def _on_message(client, userdata, msg):
                 _recompute_matches(uid, client)
         except Exception as e:
             logger.exception(f"match trigger failed: {e}")
+
+    # 3) fanout match.found via WebSocket (Uber-style live notification)
+    if msg.topic == TOPIC_MATCH_FOUND:
+        try:
+            payload = json.loads(msg.payload.decode("utf-8"))
+            _fanout_match_to_ws(payload)
+        except Exception as e:
+            logger.exception(f"WS fanout failed: {e}")
 
 
 def start_subscriber() -> mqtt.Client:

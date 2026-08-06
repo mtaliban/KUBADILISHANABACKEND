@@ -151,16 +151,68 @@ async def my_contacts(user=Depends(current_user)):
     return out
 
 
+@router.get("/presence")
+async def presence(user=Depends(current_user)):
+    """Who is currently online? (WebSocket-connected right now)"""
+    return {"online_user_ids": manager.online_users(), "count": len(manager.online_users())}
+
+
+@router.get("/presence/{user_id}")
+async def check_presence(user_id: str, user=Depends(current_user)):
+    """Is a specific user online? Returns online + last_seen_at."""
+    db = get_db()
+    u = await db.users.find_one({"_id": ObjectId(user_id)}, {"last_seen_at": 1})
+    return {"user_id": user_id, "online": manager.is_online(user_id),
+            "last_seen_at": (u or {}).get("last_seen_at")}
+
+
 @ws_router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
+    """
+    Client message types:
+      - {type: 'ping'} → server replies {type: 'pong'}
+      - {type: 'typing', to: userId, on: true|false} → server relays to recipient
+      - {type: 'presence_ping'}   → server updates last_seen_at
+    Server may push at any time:
+      - {event: 'message.sent', ...}     (chat)
+      - {event: 'match.found', ...}      (live matches, Uber-style)
+      - {event: 'typing', from: id, on: true|false}
+      - {event: 'presence', user_id, online: true|false}
+      - {event: 'call.initiated', ...}
+    """
     uid = user_id_from_token(token)
     if not uid:
         await ws.close(code=4401); return
     await manager.connect(uid, ws)
+
+    # Announce online + update DB last_seen
+    now = datetime.now(timezone.utc)
+    await get_db().users.update_one({"_id": ObjectId(uid)}, {"$set": {"last_seen_at": now, "is_online": True}})
+
     try:
         while True:
             data = await ws.receive_json()
-            if data.get("type") == "ping":
+            t = data.get("type")
+
+            if t == "ping":
                 await ws.send_json({"type": "pong"})
+
+            elif t == "typing":
+                to_id = data.get("to")
+                on = bool(data.get("on"))
+                if to_id:
+                    await manager.send_to_user(to_id, {
+                        "event": "typing", "from_user_id": uid, "on": on,
+                    })
+
+            elif t == "presence_ping":
+                await get_db().users.update_one(
+                    {"_id": ObjectId(uid)},
+                    {"$set": {"last_seen_at": datetime.now(timezone.utc)}},
+                )
     except WebSocketDisconnect:
         manager.disconnect(uid, ws)
+        await get_db().users.update_one(
+            {"_id": ObjectId(uid)},
+            {"$set": {"last_seen_at": datetime.now(timezone.utc), "is_online": False}},
+        )
