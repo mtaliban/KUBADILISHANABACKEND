@@ -1,9 +1,11 @@
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from .config import settings
 from .events.subscriber import start_subscriber, stop_subscriber
@@ -75,3 +77,29 @@ async def root():
 @app.get("/health", tags=["ops"])
 async def health():
     return {"status": "ok", "started_at": os.environ.get("_KV_STARTED_AT")}
+
+
+# ─── Prometheus metrics ──────────────────────────────
+REQ_COUNT = Counter("kv_http_requests_total", "HTTP requests", ["method", "path", "status"])
+REQ_LATENCY = Histogram("kv_http_request_seconds", "HTTP request latency", ["method", "path"])
+
+
+@app.middleware("http")
+async def _prom_middleware(request: Request, call_next):
+    start = time.time()
+    resp = await call_next(request)
+    elapsed = time.time() - start
+    # normalize path template to avoid explosion (skip metrics on /metrics itself)
+    path = request.url.path
+    if path != "/metrics":
+        # collapse dynamic segments
+        norm = "/" + "/".join(p if not (len(p) == 24 and all(c in "0123456789abcdef" for c in p)) else ":id" for p in path.strip("/").split("/"))
+        REQ_COUNT.labels(request.method, norm, resp.status_code).inc()
+        REQ_LATENCY.labels(request.method, norm).observe(elapsed)
+    return resp
+
+
+@app.get("/metrics", tags=["ops"])
+async def metrics():
+    """Prometheus scrape endpoint."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

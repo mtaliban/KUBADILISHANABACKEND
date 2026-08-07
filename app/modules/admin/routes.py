@@ -143,6 +143,52 @@ async def live_events(_=Depends(current_admin)):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+from pydantic import BaseModel, Field
+from ...security import hash_password
+
+
+class AdminUpdateUser(BaseModel):
+    full_name: str | None = Field(None, min_length=3, max_length=100)
+    phone_alt: str | None = None
+    category: str | None = None
+    cadre_code: str | None = None
+    subjects: list[str] | None = None
+    current_station: dict | None = None
+    desired_destinations: list[dict] | None = None
+    status: str | None = None
+    is_verified: bool | None = None
+    is_admin: bool | None = None
+    new_password: str | None = Field(None, min_length=6)
+
+
+@router.patch("/users/{user_id}")
+async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(current_admin)):
+    updates = body.model_dump(exclude_none=True)
+    if "new_password" in updates:
+        updates["password_hash"] = hash_password(updates.pop("new_password"))
+    if not updates:
+        raise HTTPException(400, "No changes")
+    updates["updated_at"] = datetime.now(timezone.utc)
+    r = await get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
+    if not r.matched_count:
+        raise HTTPException(404, "User not found")
+    fresh = await get_db().users.find_one({"_id": ObjectId(user_id)}, {"password_hash": 0})
+    fresh["_id"] = str(fresh["_id"])
+    return fresh
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(user_id: str, _=Depends(current_admin)):
+    db = get_db()
+    oid = ObjectId(user_id)
+    r = await db.users.delete_one({"_id": oid})
+    if not r.deleted_count:
+        raise HTTPException(404, "User not found")
+    await db.matches.delete_many({"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]})
+    await db.messages.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    return {"ok": True, "deleted_user_id": user_id}
+
+
 @router.post("/users/{user_id}/grant-admin")
 async def grant_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": {"is_admin": True}})

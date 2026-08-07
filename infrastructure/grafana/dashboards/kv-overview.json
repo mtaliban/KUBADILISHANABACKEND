@@ -1,0 +1,40 @@
+{
+  "title": "KV Backend — Overview",
+  "uid": "kv-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Total Requests",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(kv_http_requests_total)", "refId": "A"}]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Errors (5xx)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [{"expr": "sum(kv_http_requests_total{status=~\"5..\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "red"}}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Requests / sec (1m avg)",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "sum(rate(kv_http_requests_total[1m]))", "refId": "A"}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "p95 Latency (s)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(kv_http_request_seconds_bucket[5m])) by (le))", "refId": "A"}]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Requests per path (rate/1m)",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "targets": [{"expr": "sum by (path) (rate(kv_http_requests_total[1m]))", "refId": "A", "legendFormat": "{{path}}"}]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Latency by path (p95)",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (path, le) (rate(kv_http_request_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{path}}"}]
+    }
+  ]
+}
