@@ -15,6 +15,7 @@ from .modules.locations.routes import router as locations_router
 from .modules.matches.routes import router as matches_router
 from .modules.messaging.routes import router as messages_router, ws_router
 from .modules.admin.routes import router as admin_router
+from .modules.payments.routes import router as payments_router
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -65,6 +66,7 @@ app.include_router(locations_router)
 app.include_router(matches_router)
 app.include_router(messages_router)
 app.include_router(admin_router)
+app.include_router(payments_router)
 app.include_router(ws_router)  # /ws?token=
 
 
