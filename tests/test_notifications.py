@@ -134,6 +134,11 @@ def test_subscriber_notifies_both_users_on_match_found(monkeypatch):
     db.users.insert_many([a, b])
     client = _FakeClient()
 
+    # Capture WS pushes — browser listens on the authenticated WebSocket,
+    # so notifications are delivered via WS batch (not raw MQTT anymore).
+    ws_batch: list[tuple[dict, str]] = []
+    monkeypatch.setattr(sub, "_push_batch_to_users", lambda batch: ws_batch.extend(batch))
+
     sub._generate_notifications(_FakeMsg(TOPIC_MATCH_FOUND, {
         "event": "match.found", "user_a_id": str(a["_id"]), "user_b_id": str(b["_id"]),
         "score": 0.85, "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -143,10 +148,10 @@ def test_subscriber_notifies_both_users_on_match_found(monkeypatch):
     assert len(notifs) == 2
     assert {n["user_id"] for n in notifs} == {str(a["_id"]), str(b["_id"])}
     assert all(n["type"] == "match.found" for n in notifs)
-    # MQTT notification events emitted per user
-    topics = [t for t, _, _ in client.published]
-    assert f"kv/notification/{a['_id']}" in topics
-    assert f"kv/notification/{b['_id']}" in topics
+    # Secure WS fanout: both matched users receive their own notification payload
+    ws_users = {uid for _, uid in ws_batch}
+    assert {str(a["_id"]), str(b["_id"])} <= ws_users
+    assert all(p["event"] == "notification" for p, _ in ws_batch)
 
 
 def test_subscriber_notifies_admins_on_payment_submitted(monkeypatch):

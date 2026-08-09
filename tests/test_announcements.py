@@ -186,7 +186,10 @@ async def test_subscriber_notifies_announcement_recipient(monkeypatch):
     db = mongomock.MongoClient()["kv_test"]
     monkeypatch.setattr(sub, "get_sync_db", lambda: db)
     monkeypatch.setattr(sub, "_append_csv", lambda row: None)
-    monkeypatch.setattr(sub, "_push_batch_to_users", lambda batch: None)
+
+    # Browser listens on the authenticated WebSocket — capture WS pushes.
+    ws_batch: list[tuple[dict, str]] = []
+    monkeypatch.setattr(sub, "_push_batch_to_users", lambda batch: ws_batch.extend(batch))
 
     class _FakeMsg:
         topic = "kv/announcement/abc123"
@@ -206,4 +209,6 @@ async def test_subscriber_notifies_announcement_recipient(monkeypatch):
     assert notifs[0]["user_id"] == "abc123"
     assert notifs[0]["type"] == "announcement"
     assert "Sherehe" in notifs[0]["title"]
-    assert any(t == "kv/notification/abc123" for t, _ in client.published)
+    # Notification delivered via authenticated WS to the recipient
+    assert any(uid == "abc123" for _, uid in ws_batch)
+    assert any(p.get("event") == "notification" for p, uid in ws_batch if uid == "abc123")
