@@ -5,7 +5,8 @@ class Settings(BaseSettings):
     # MongoDB
     mongo_uri: str = "mongodb://admin:changeme@localhost:27017/kubadilishana_vituo?authSource=admin"
 
-    # MQTT — swap to HiveMQ Cloud / EMQX Cloud by changing these env vars
+    # MQTT — self-hosted Mosquitto kwenye docker-compose yako mwenyewe.
+    # (Hakuna cloud broker — kila kitu kinakaa kwenye backend/EC2 yako.)
     mqtt_host: str = "localhost"
     mqtt_port: int = 1883
     mqtt_username: str = ""

@@ -1,6 +1,6 @@
-# Backend-only compose: 1 monolith + Mongo + MQTT broker + Redis
-# For cloud MQTT (HiveMQ/EMQX), remove the `mosquitto` service and set
-# MQTT_HOST/PORT/USERNAME/PASSWORD/USE_TLS env vars on `backend`.
+# Backend-only compose: 1 monolith + Mongo + MQTT broker (Mosquitto) + Redis.
+# Kila kitu kinakaa kwenye backend yako mwenyewe (EC2/local) — hakuna cloud
+# broker wala cloud database. Inataka cloud? Badilisha MQTT_HOST/MONGO_URI tu.
 services:
   mongodb:
     image: mongo:4.4
@@ -21,6 +21,15 @@ services:
     container_name: kv_mosquitto
     restart: unless-stopped
     ports: ["1883:1883", "9001:9001"]
+    # mosquitto.passwd haiko kwenye git (security!) — ina-generate hapa kwenye
+    # startup kutoka MQTT_USERNAME/MQTT_PASSWORD env vars.
+    command: >
+      sh -c "mosquitto_passwd -b -c /mosquitto/config/mosquitto.passwd
+      ${MQTT_USERNAME:-kvuser} ${MQTT_PASSWORD:-KvChangeMe2026}
+      && exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf"
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-kvuser}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-KvChangeMe2026}
     volumes:
       - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
@@ -45,8 +54,8 @@ services:
       MONGO_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/kubadilishana_vituo?authSource=admin
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
-      MQTT_USERNAME: ${MQTT_USERNAME:-}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_USERNAME: ${MQTT_USERNAME:-kvuser}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-KvChangeMe2026}
       MQTT_USE_TLS: ${MQTT_USE_TLS:-false}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}

@@ -1,5 +1,5 @@
-"""Singleton MQTT publisher for the whole backend. Supports Mosquitto (local),
-HiveMQ Cloud, EMQX Cloud — anything MQTT 5 compatible."""
+"""Singleton MQTT publisher for the whole backend. Uses the self-hosted
+Mosquitto broker (docker-compose) — kila kitu kinakaa kwenye backend yako."""
 import json
 import logging
 import ssl

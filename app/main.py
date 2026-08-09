@@ -46,9 +46,9 @@ app = FastAPI(
 
 **Modules:** auth · users · locations · matches · messaging · admin
 
-**Event-driven core:** MQTT broker (Mosquitto local, or HiveMQ Cloud / EMQX Cloud
-in production). Every mutation publishes an event; subscribers (matching + analytics)
-run in the same process for simplicity.
+**Event-driven core:** MQTT broker (self-hosted Mosquitto kwenye docker-compose —
+hakuna cloud broker). Every mutation publishes an event; subscribers (matching +
+analytics) run in the same process for simplicity.
 
 **Broker config:** set env vars `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`,
 `MQTT_PASSWORD`, `MQTT_USE_TLS`.""",

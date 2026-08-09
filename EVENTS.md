@@ -2,25 +2,23 @@
 
 ## 🔌 MQTT Broker
 
-Backend inatumia MQTT broker moja kwa events zote. **Local dev** — Mosquitto ndani ya docker. **Production/online** — pendekezo langu ni **HiveMQ Cloud (Serverless)** au **EMQX Cloud** (zote zina free tier).
+Backend inatumia MQTT broker moja kwa events zote: **Mosquitto self-hosted**,
+inayorun ndani ya docker-compose yako (EC2 au local). Hakuna cloud broker —
+kila kitu kinakaa kwenye backend yako mwenyewe.
 
 ### Configure via env vars
 
-| Env var | Local (Mosquitto) | HiveMQ Cloud | EMQX Cloud |
-|---|---|---|---|
-| `MQTT_HOST` | `mosquitto` | `xxxxx.s2.eu.hivemq.cloud` | `xxxxx.emqx.cloud` |
-| `MQTT_PORT` | `1883` | `8883` | `8883` |
-| `MQTT_USERNAME` | *(blank)* | your username | your username |
-| `MQTT_PASSWORD` | *(blank)* | your password | your password |
-| `MQTT_USE_TLS` | `false` | `true` | `true` |
-| `NEXT_PUBLIC_MQTT_WS` | `ws://localhost:9001` | `wss://xxxxx.s2.eu.hivemq.cloud:8884/mqtt` | `wss://xxxxx.emqx.cloud:8084/mqtt` |
+| Env var | Local/EC2 (docker-compose) |
+|---|---|
+| `MQTT_HOST` | `mosquitto` |
+| `MQTT_PORT` | `1883` |
+| `MQTT_USERNAME` | `kvuser` (docker-compose ina-generate passwd yenyewe) |
+| `MQTT_PASSWORD` | `KvChangeMe2026` (badilisha kwenye .env!) |
+| `MQTT_USE_TLS` | `false` |
 
-### How to get HiveMQ Cloud (dakika 5)
-1. https://console.hivemq.cloud/ → Sign up (bure)
-2. Create cluster (Serverless / Starter)
-3. Access management → create credentials
-4. Copy connection strings hapo juu → paste kwenye `.env`
-5. Restart backend: `docker compose restart backend`
+> Browser haitumi MQTT kabisa — live events zote (chats, arifa, matangazo,
+> matches, presence) zinasafiri kupitia **backend WebSocket (`/ws`)** iliyolindwa
+> na JWT ya kila user. MQTT (Mosquitto) ni **backend-internal tu**.
 
 Broker inasapoti MQTT 3.1.1 na 5.0. QoS 1 default (at-least-once) — safi kwa events zetu.
 
@@ -67,12 +65,12 @@ POST /auth/register
    ↓
 auth module: insert user in Mongo + publish "kv/user/registered"
                                                  ↓
-                                        Mosquitto (broker)
+                                        Mosquitto (broker, self-hosted)
                                                  ↓
                         ┌────────────────────────┼────────────────────────┐
                         ↓                        ↓                        ↓
-              matching subscriber      analytics subscriber      frontend (MQTT.js browser)
-              (same process,           (same process,            (browser subscribed via ws:9001)
+              matching subscriber      analytics subscriber      backend WS fanout
+              (same process,           (same process,            (browser inasikia via /ws)
                background thread)      background thread)
                         ↓                        ↓                        ↓
               recompute matches         insert event_log +        live badge, dashboard reload

@@ -252,7 +252,7 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
             }
             # NOTE: no more MQTT publish here — the browser listens on the
             # authenticated WebSocket (see useLiveEvents). Publishing these
-            # to MQTT would only burn broker bandwidth (HiveMQ free 10GB/mo).
+            # to MQTT too would just duplicate traffic on our own broker.
             ws_batch.append((notif_payload, uid))
     if ws_batch:
         _push_batch_to_users(ws_batch)
