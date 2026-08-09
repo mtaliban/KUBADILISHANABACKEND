@@ -72,11 +72,26 @@ services:
     depends_on: [mongodb, mosquitto, redis]
     networks: [kv_net]
 
+  # Reverse proxy: HTTPS ya bure (Let's Encrypt) kupitia sslip.io —
+  # hii inafanya backend iwe reachable kwa frontend ya Vercel (HTTPS→HTTPS).
+  caddy:
+    image: caddy:2-alpine
+    container_name: kv_caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [backend]
+
 volumes:
   mongo_data:
   mosquitto_data:
   mosquitto_log:
   redis_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   kv_net:

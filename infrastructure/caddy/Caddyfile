@@ -1,0 +1,14 @@
+# ============================================================
+# Caddy — reverse proxy + HTTPS (Let's Encrypt) kwa backend API.
+#
+# Hakuna custom domain bado → tunatumia sslip.io (free DNS):
+#   api.16-171-23-21.sslip.io  →  16.171.23.21  (EC2 yako)
+# Caddy inapata SSL certificate ya bure moja kwa moja.
+#
+# Baada ya kupata domain halisi, badilisha tu hostname hapa
+# (k.m. api.kubadilishana.go.tz) — SSL bado itafanya kazi.
+# ============================================================
+
+api.16-171-23-21.sslip.io {
+	reverse_proxy 127.0.0.1:8000
+}
