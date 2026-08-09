@@ -24,8 +24,12 @@ services:
     # mosquitto.passwd haiko kwenye git (security!) — ina-generate hapa kwenye
     # startup kutoka MQTT_USERNAME/MQTT_PASSWORD env vars.
     command: >
-      sh -c "mosquitto_passwd -b -c /mosquitto/config/mosquitto.passwd
+      # passwd file lazima iwe readable na user 'mosquitto' (mosquitto ina-drop
+      # privileges) — ndiyo maana tunafanya chmod 644 baada ya kui-generate.
+      sh -c "rm -f /mosquitto/config/mosquitto.passwd
+      && mosquitto_passwd -b -c /mosquitto/config/mosquitto.passwd
       ${MQTT_USERNAME:-kvuser} ${MQTT_PASSWORD:-KvChangeMe2026}
+      && chmod 644 /mosquitto/config/mosquitto.passwd
       && exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf"
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-kvuser}
