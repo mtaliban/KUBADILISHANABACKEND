@@ -32,30 +32,47 @@ jobs:
       - name: Run pytest
         run: pytest -v --tb=short
 
-  docker-build:
-    name: CI — Docker build
+  # ============ STEP 2: Docker build + push kwenye Docker Hub ============
+  docker-push:
+    name: CI — Docker build + push (Docker Hub)
     runs-on: ubuntu-latest
     needs: test
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Build (validate Dockerfile — not pushed)
+
+      - name: Login to Docker Hub
+        if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_TOKEN }}
+
+      - name: Build & push image (Docker Hub)
+        if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: kv-backend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: true
+          tags: |
+            mtalibani/kubadilishan:latest
+            mtalibani/kubadilishan:${{ github.sha }}
 
-  # ============ STEP 2: CD (inakuja TU baada ya CI kufaulu) ============
-  # Deploy: git pull + docker compose up kwenye EC2 yako.
-  # Inarun kwenye push ya main pekee (sio pull requests).
+      - name: Skip notice (Docker Hub secrets bado hazijawekwa)
+        if: ${{ env.DOCKER_USERNAME == '' || env.DOCKER_TOKEN == '' }}
+        run: |
+          echo "::warning::Docker Hub secrets hazijawekwa bado — push imeskipped (hii ni sawa)."
+          echo "Weka DOCKER_USERNAME na DOCKER_TOKEN kwenye:"
+          echo "https://github.com/mtaliban/KUBADILISHANABACKEND/settings/secrets/actions"
+
+  # ============ STEP 3: CD — Deploy kwenye EC2 (image inapull kutoka Docker Hub) ============
   deploy:
     name: CD — Deploy to EC2 (16.171.23.21)
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: docker-push
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     env:
       EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -95,7 +112,9 @@ jobs:
               echo "::warning::EC2: .env haikuwepo — imenakiliwa kutoka .env.example. Badilisha JWT_SECRET na MQTT_PASSWORD!"
             fi
 
-            docker compose up -d --build --pull always
+            # Image ya backend inapull kutoka Docker Hub (mtalibani/kubadilishan:latest)
+            docker compose pull
+            docker compose up -d
             sleep 5
             echo "=== Health check ==="
             curl -s -o /dev/null -w "health: %{http_code}\n" http://localhost:8000/health || echo "health: unreachable"

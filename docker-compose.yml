@@ -47,6 +47,7 @@ services:
 
   backend:
     build: .
+    image: mtalibani/kubadilishan:latest
     container_name: kv_backend
     restart: unless-stopped
     ports: ["8000:8000"]
