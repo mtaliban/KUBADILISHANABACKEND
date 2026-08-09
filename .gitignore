@@ -11,6 +11,9 @@ venv/
 *.egg-info/
 services/analytics-service/csv_output/*.csv
 !services/analytics-service/csv_output/.gitkeep
+*.pem
+*.key
+*.passwd
 .DS_Store
 .vscode/
 .idea/

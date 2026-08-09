@@ -31,11 +31,13 @@ def match_score(a: dict, b: dict) -> float:
         return 0.0
     score = 0.5
     for d in a_d:
+        # Consider EVERY matching destination and keep the best (most specific)
+        # score — no early break, so a facility-level match beats a region-level one
+        # even when the region destination is listed first.
         if _station_satisfies_destination(b_st, d):
             if d.get("facility_id"): score = max(score, 1.0)
             elif d.get("district_id"): score = max(score, 0.85)
             else: score = max(score, 0.65)
-            break
     return score
 
 

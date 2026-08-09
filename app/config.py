@@ -29,16 +29,24 @@ class Settings(BaseSettings):
     csv_output_dir: str = "/app/csv_output"
     log_file: str = "/app/csv_output/backend.log"
 
-    # Selcom payments — set to 'live' after receiving Selcom credentials
-    selcom_mode: str = "mock"           # 'mock' | 'live'
-    selcom_vendor_code: str = ""        # TILLxxxxxx from Selcom
-    selcom_api_key: str = ""
-    selcom_api_secret: str = ""
-    selcom_base_url: str = "https://apigw.selcommobile.com/v1"
-    selcom_webhook_secret: str = "webhook-shared-secret"
+    # Donations — manual verification flow.
+    # Donors pay this mobile-money number (any network), then paste the SMS
+    # confirmation on the donate page; the admin verifies and approves.
+    donation_phone: str = "0763795801"
     payment_currency: str = "TZS"
-    payment_default_amount: int = 1000
-    public_base_url: str = "http://localhost:8080"  # for callback_url
+
+    # Admin login — admins authenticate with email (never phone). The email
+    # must be verified by code before admin access is granted.
+    admin_email: str = "admin@kubadilishana.go.tz"
+
+    # Brute-force protection (in-memory rate limit).
+    rate_limit_max: int = 10      # max attempts per window
+    rate_limit_window: int = 300  # window in seconds (5 min)
+
+    # Only trust X-Forwarded-For when running behind a proxy that sets it.
+    # Leave False for direct exposure — otherwise clients can spoof the header
+    # and rotate their identity to bypass rate limiting.
+    trust_proxy_headers: bool = False
 
     class Config:
         env_file = ".env"

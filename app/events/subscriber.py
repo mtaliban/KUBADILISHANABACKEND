@@ -2,8 +2,9 @@
 
 Two responsibilities:
 1) Analytics: log every event to Mongo `event_log` and append to daily CSV.
-2) Matching: on user.registered / destination_changed / station_changed,
-   recompute matches and publish kv/match/found.
+2) Matching: on user.registered / destination_changed / station_changed /
+   updated_by_admin, recompute matches (stale matches dropped first) and
+   publish kv/match/found.
 """
 import csv
 import json
@@ -17,9 +18,13 @@ from ..config import settings
 from ..db import get_sync_db
 from ..modules.matches.matching import match_score
 from .topics import (
-    TOPIC_ALL, TOPIC_USER_REGISTERED,
+    TOPIC_ALL, TOPIC_USER_REGISTERED, TOPIC_USER_PROFILE_UPDATED,
     TOPIC_USER_DESTINATION_CHANGED, TOPIC_USER_STATION_CHANGED,
+    TOPIC_USER_UPDATED_BY_ADMIN,
     TOPIC_MATCH_FOUND,
+    TOPIC_MESSAGE_SENT, TOPIC_CALL_INITIATED,
+    TOPIC_PAYMENT_SUBMITTED, TOPIC_PAYMENT_APPROVED, TOPIC_PAYMENT_REJECTED,
+    TOPIC_ANNOUNCEMENT,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +73,9 @@ def _recompute_matches(user_id: str, client: mqtt.Client) -> int:
     user = db.users.find_one({"_id": ObjectId(user_id)})
     if not user:
         return 0
+    # Drop stale matches first so a cadre/category/station change never leaves
+    # obsolete pairs behind.
+    db.matches.delete_many({"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]})
     q = {"_id": {"$ne": user["_id"]}, "category": user["category"], "cadre_code": user["cadre_code"], "status": "active"}
     now = datetime.now(timezone.utc)
     saved = 0
@@ -89,6 +97,165 @@ def _recompute_matches(user_id: str, client: mqtt.Client) -> int:
         }), qos=1)
     logger.info(f"recomputed matches for {user_id}: {saved}")
     return saved
+
+
+def _push_to_users(payload: dict, user_ids: list[str]) -> None:
+    """Push a WS message to a list of user ids (from a background thread)."""
+    from ..modules.messaging.ws_manager import manager
+    import asyncio
+
+    async def push():
+        for uid in user_ids:
+            if uid:
+                await manager.send_to_user(uid, payload)
+
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(push())
+        loop.close()
+    except Exception as e:
+        logger.exception(f"WS push failed: {e}")
+
+
+def _push_batch_to_users(batch: list[tuple[dict, str]]) -> None:
+    """Push many WS payloads in ONE event loop (from a background thread)."""
+    from ..modules.messaging.ws_manager import manager
+    import asyncio
+
+    async def push():
+        for payload, uid in batch:
+            if uid:
+                await manager.send_to_user(uid, payload)
+
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(push())
+        loop.close()
+    except Exception as e:
+        logger.exception(f"WS push failed: {e}")
+
+
+def _admin_user_ids(db) -> list[str]:
+    return [str(u["_id"]) for u in db.users.find({"is_admin": True}, {"_id": 1})]
+
+
+def _match_partners(db, uid: str) -> list[str]:
+    partners: set[str] = set()
+    for m in db.matches.find({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]}, {"user_a_id": 1, "user_b_id": 1}):
+        if m["user_a_id"] == uid:
+            partners.add(m["user_b_id"])
+        else:
+            partners.add(m["user_a_id"])
+    return list(partners)
+
+
+def _generate_notifications(msg, client: mqtt.Client) -> None:
+    """Turn events into user-facing notifications (single funnel)."""
+    db = get_sync_db()
+    # Our own kv/notification/* events must not generate more notifications.
+    if msg.topic.startswith("kv/notification/"):
+        return
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+    except Exception:
+        return
+
+    pending: list[tuple[str, str, str, str, dict]] = []  # (uid, type, title, body, data)
+    # Live WS payloads (rich events separate from notifications) — one batch.
+    ws_batch: list[tuple[dict, str]] = []
+
+    def notify(user_ids: list[str], ntype: str, title: str, body: str, data: dict | None = None):
+        for uid in user_ids:
+            if uid:
+                pending.append((uid, ntype, title, body, data or {}))
+
+    topic = msg.topic
+    if topic == TOPIC_USER_REGISTERED:
+        uid = payload.get("user_id")
+        u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
+        name = (u or {}).get("full_name", "Mtumiaji mpya")
+        notify(_admin_user_ids(db), "user.registered", f"{name} amejiunga 🎉",
+               f"Kada: {payload.get('cadre_code')}", {"user_id": uid})
+        # Wengine wote pia wapate kujua mtumiaji mpya amejiunga (sio admin pekee)
+        all_others = [str(x["_id"]) for x in db.users.find(
+            {"status": "active", "is_admin": {"$ne": True}}, {"_id": 1})]
+        notify([u2 for u2 in all_others if u2 != uid], "user.registered",
+               f"{name} amejiunga na jukwaa 🎉",
+               f"Kada: {payload.get('cadre_code')} — karibu!", {"user_id": uid})
+        # Live WS fanout (rich payload) — request feed ya Uber inahitaji data
+        # kamili bila MQTT kwenye browser (browser inasikia kupitia WS token).
+        for other in all_others:
+            if other != uid:
+                ws_batch.append((dict(payload), other))
+    elif topic == TOPIC_MATCH_FOUND:
+        a_id, b_id = payload.get("user_a_id"), payload.get("user_b_id")
+        score = round(float(payload.get("score") or 0) * 100)
+        a = db.users.find_one({"_id": ObjectId(a_id)}, {"full_name": 1}) if a_id else None
+        b = db.users.find_one({"_id": ObjectId(b_id)}, {"full_name": 1}) if b_id else None
+        if a_id and b:
+            notify([b_id], "match.found", f"{b['full_name']}, mtu mpya wa kubadilishana nawe 🎯",
+                   f"{a['full_name']} — score {score}%", {"user_id": a_id, "score": payload.get("score")})
+        if b_id and a:
+            notify([a_id], "match.found", f"{a['full_name']}, mtu mpya wa kubadilishana nawe 🎯",
+                   f"{b['full_name']} — score {score}%", {"user_id": b_id, "score": payload.get("score")})
+    elif topic.startswith(TOPIC_MESSAGE_SENT + "/"):
+        to_id = topic.rsplit("/", 1)[1]
+        notify([to_id], "message.sent", f"Ujumbe kutoka {payload.get('from_full_name', 'mtumiaji')} 💬",
+               (payload.get("text") or "")[:120], {"from_user_id": payload.get("from_user_id")})
+    elif topic.startswith(TOPIC_CALL_INITIATED + "/"):
+        to_id = topic.rsplit("/", 1)[1]
+        notify([to_id], "call.initiated", f"{payload.get('from_full_name', 'Mtu')} amekupigia 📞",
+               "Angalia simu yako — mpigie tena", {"from_user_id": payload.get("from_user_id")})
+    elif topic.startswith(TOPIC_PAYMENT_SUBMITTED + "/"):
+        amount = payload.get("amount") or 0
+        notify(_admin_user_ids(db), "payment.submitted", "Mchango mpya unahitaji uthibitisho 💰",
+               f"TZS {amount:,} — angalia SMS na uthibitishe", {"order_id": payload.get("order_id")})
+    elif topic.startswith(TOPIC_PAYMENT_APPROVED + "/"):
+        uid = topic.rsplit("/", 1)[1]
+        notify([uid], "payment.approved", "Mchango wako umekubaliwa ✓",
+               f"TZS {payload.get('amount') or 0:,} — asante!", {"order_id": payload.get("order_id")})
+    elif topic.startswith(TOPIC_PAYMENT_REJECTED + "/"):
+        uid = topic.rsplit("/", 1)[1]
+        notify([uid], "payment.rejected", "Mchango wako umekataliwa ✗",
+               "Wasiliana na admin kwa maelezo", {"order_id": payload.get("order_id")})
+    elif topic == TOPIC_USER_PROFILE_UPDATED:
+        uid = payload.get("user_id")
+        u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
+        if u:
+            notify(_match_partners(db, uid), "user.profile_updated",
+                   f"{u['full_name']} amesasisha wasifu wake 👤",
+                   "Angalia maelezo mapya kwenye dashboard", {"user_id": uid})
+    elif topic.startswith(TOPIC_ANNOUNCEMENT + "/"):
+        # Admin tangazo → notification kwa mtu aliyelengwa
+        uid = topic.rsplit("/", 1)[1]
+        notify([uid], "announcement", payload.get("title", "Tangazo la admin 📢"),
+               payload.get("message", "")[:160],
+               {"announcement_id": payload.get("announcement_id")})
+        # Live WS event kwa recipient — megaphone/banner zinabadilika papo hapo.
+        # Use event name "announcement" so the browser hook (useLiveEvents) matches.
+        ws_payload = dict(payload)
+        ws_payload["event"] = "announcement"
+        ws_batch.append((ws_payload, uid))
+
+    # Persist + publish MQTT for every queued notification, then push WS in ONE loop.
+    if pending:
+        for uid, ntype, title, body, data in pending:
+            doc = {
+                "user_id": uid, "type": ntype, "title": title, "body": body,
+                "data": data, "read": False, "created_at": datetime.now(timezone.utc),
+            }
+            db.notifications.insert_one(doc)
+            notif_payload = {
+                "event": "notification", "notification_id": str(doc["_id"]), "type": ntype,
+                "title": title, "body": body, "data": data,
+                "occurred_at": doc["created_at"].isoformat(),
+            }
+            # NOTE: no more MQTT publish here — the browser listens on the
+            # authenticated WebSocket (see useLiveEvents). Publishing these
+            # to MQTT would only burn broker bandwidth (HiveMQ free 10GB/mo).
+            ws_batch.append((notif_payload, uid))
+    if ws_batch:
+        _push_batch_to_users(ws_batch)
 
 
 def _fanout_match_to_ws(payload: dict) -> None:
@@ -140,8 +307,10 @@ def _on_message(client, userdata, msg):
     except Exception as e:
         logger.exception(f"log_event failed: {e}")
 
-    # 2) matching triggers
-    if msg.topic in (TOPIC_USER_REGISTERED, TOPIC_USER_DESTINATION_CHANGED, TOPIC_USER_STATION_CHANGED):
+    # 2) matching triggers (incl. admin edits — fixes matches never recomputing
+    #    when an admin changed station/destinations directly)
+    if msg.topic in (TOPIC_USER_REGISTERED, TOPIC_USER_DESTINATION_CHANGED,
+                     TOPIC_USER_STATION_CHANGED, TOPIC_USER_UPDATED_BY_ADMIN):
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
             uid = payload.get("user_id")
@@ -150,7 +319,13 @@ def _on_message(client, userdata, msg):
         except Exception as e:
             logger.exception(f"match trigger failed: {e}")
 
-    # 3) fanout match.found via WebSocket (Uber-style live notification)
+    # 3) turn events into user-facing notifications
+    try:
+        _generate_notifications(msg, client)
+    except Exception as e:
+        logger.exception(f"notification generation failed: {e}")
+
+    # 4) fanout match.found via WebSocket (Uber-style live notification)
     if msg.topic == TOPIC_MATCH_FOUND:
         try:
             payload = json.loads(msg.payload.decode("utf-8"))

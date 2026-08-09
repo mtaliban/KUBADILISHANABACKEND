@@ -1,15 +1,22 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pymongo.errors import DuplicateKeyError
 from ...db import get_db
-from ...security import hash_password, verify_password, create_access_token, normalize_phone, current_user
+from ...security import (
+    hash_password, verify_password, create_access_token, normalize_phone, normalize_email,
+    current_user, rate_limited, clear_attempts, client_ip,
+)
 from ...events.publisher import publish
-from ...events.topics import TOPIC_USER_REGISTERED
+from ...events.topics import (
+    TOPIC_USER_REGISTERED, TOPIC_USER_PASSWORD_RESET_REQUESTED, TOPIC_USER_PASSWORD_RESET_COMPLETED,
+    TOPIC_EMAIL_VERIFICATION_REQUESTED, TOPIC_EMAIL_VERIFIED,
+)
 from .schemas import (
     RegisterRequest, RegisterResponse, LoginRequest, LoginResponse,
     ForgotPasswordRequest, ResetPasswordRequest,
+    AdminEmailLoginRequest, EmailVerifyRequest, EmailConfirmRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,7 +26,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
+    # Brute-force protection on account creation per IP.
+    # Intentionally NOT cleared on success: mass account creation from one
+    # address is exactly what this guard limits.
+    rate_limited(f"register:{client_ip(request)}")
     db = get_db()
     try:
         phone = normalize_phone(body.phone_primary)
@@ -59,10 +70,13 @@ async def register(body: RegisterRequest):
         raise HTTPException(409, "Phone number already registered")
 
     uid = str(result.inserted_id)
+    # Rich payload so live dashboards can render the request card immediately
+    # (Uber-style request feed) without extra lookups.
     publish(TOPIC_USER_REGISTERED, {
         "event": "user.registered", "user_id": uid,
+        "full_name": doc["full_name"], "phone_primary": phone,
         "category": body.category, "cadre_code": body.cadre_code,
-        "subjects": body.subjects,
+        "cadre_display": cadre["display_name"], "subjects": body.subjects,
         "current_station": doc["current_station"],
         "desired_destinations": doc["desired_destinations"],
         "occurred_at": now.isoformat(),
@@ -74,16 +88,26 @@ async def register(body: RegisterRequest):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest):
-    db = get_db()
+async def login(body: LoginRequest, request: Request):
+    # Brute-force protection: per phone + per IP
     try:
         phone = normalize_phone(body.phone)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    key = f"login:{phone}:{client_ip(request)}"
+    rate_limited(key)
+    db = get_db()
     user = await db.users.find_one({"phone_primary": phone})
     if not user or not verify_password(body.password, user["password_hash"]):
+        # Still record the failed attempt (rate_limited was already called)
         raise HTTPException(401, "Invalid credentials")
+    if user.get("status") == "disabled":
+        raise HTTPException(403, "Account disabled — wasiliana na admin")
+    # Admins log in with their email — never a phone number.
+    if user.get("is_admin"):
+        raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia tab ya 'Admin' kwenye login page.")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+    clear_attempts(key)
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
     return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token)
 
@@ -95,6 +119,8 @@ async def me(user=Depends(current_user)):
         "full_name": user["full_name"],
         "phone_primary": user["phone_primary"],
         "phone_alt": user.get("phone_alt"),
+        "email": user.get("email"),
+        "email_verified": user.get("email_verified", False),
         "category": user["category"],
         "cadre_code": user["cadre_code"],
         "cadre_display": user.get("cadre_display", user["cadre_code"]),
@@ -108,12 +134,14 @@ async def me(user=Depends(current_user)):
 
 
 @router.post("/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest):
+async def forgot_password(body: ForgotPasswordRequest, request: Request):
     """
     Issues a 6-digit reset code, saves it hashed with 15-min TTL.
     DEV: code is logged to backend stdout (view: `docker logs kv_backend`).
     PROD: integrate with SMS provider (Beem Africa / Africa's Talking).
     """
+    # Prevent reset-code spam / phone enumeration brute-force
+    rate_limited(f"forgot:{client_ip(request)}")
     try:
         phone = normalize_phone(body.phone)
     except ValueError as e:
@@ -135,6 +163,11 @@ async def forgot_password(body: ForgotPasswordRequest):
             }}, upsert=True,
         )
         logger.warning(f"🔑 Password reset code for {phone} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
+        # user_id suffices for audit — phone is PII and already stored elsewhere.
+        publish(TOPIC_USER_PASSWORD_RESET_REQUESTED, {
+            "event": "user.password_reset_requested", "user_id": str(user["_id"]),
+            "occurred_at": now.isoformat(),
+        })
     return {"ok": True, "message": f"Kama namba ipo, umepata code kwa SMS. Halali dakika {RESET_CODE_TTL_MINUTES}."}
 
 
@@ -151,12 +184,21 @@ async def reset_password(body: ResetPasswordRequest):
     rec = await db.password_resets.find_one({"user_id": user["_id"], "used": False})
     if not rec:
         raise HTTPException(400, "Code batili au imekwisha muda")
-    if rec["expires_at"] < datetime.now(timezone.utc):
+    # BSON/PyMongo inarudisha datetimes zisizo na tzinfo (naive UTC) —
+    # linganisha kwa utulivu kabla ya kufanya comparison.
+    expires = rec["expires_at"]
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
         raise HTTPException(400, "Code imekwisha muda — omba mpya")
     if not verify_password(body.code, rec["code_hash"]):
         raise HTTPException(400, "Code batili au imekwisha muda")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
     await db.password_resets.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
+    publish(TOPIC_USER_PASSWORD_RESET_COMPLETED, {
+        "event": "user.password_reset_completed", "user_id": str(user["_id"]),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
     logger.info(f"Password reset for {phone}")
     return {"ok": True, "message": "Password imebadilishwa. Ingia sasa."}
 
@@ -169,3 +211,123 @@ async def check_phone(phone: str):
         return {"available": False, "reason": "invalid_format"}
     exists = await get_db().users.find_one({"phone_primary": p}, {"_id": 1})
     return {"available": not exists, "phone_normalized": p}
+
+
+# ─── Admin email login + verification ────────────────────────────────────
+
+@router.post("/email/verify-request")
+async def request_email_verification(body: EmailVerifyRequest, request: Request):
+    """Attach + verify the admin's own email.
+
+    `phone` identifies the account (first-time enrolment, before email exists),
+    `password` proves ownership, and `email` is what gets verified. A 6-digit
+    code is generated (DEV: logged to backend stdout). This is intentionally
+    login-free so the very first admin can enrol.
+    """
+    rate_limited(f"emailverify:{client_ip(request)}")
+    try:
+        email = normalize_email(body.email)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db = get_db()
+
+    # Find by email first (re-verification / later flow), else by phone (enrolment).
+    user = await db.users.find_one({"email": email}, {"password_hash": 1, "is_admin": 1, "full_name": 1, "email": 1})
+    if not user and body.phone:
+        try:
+            phone = normalize_phone(body.phone)
+        except ValueError:
+            phone = None
+        if phone:
+            user = await db.users.find_one({"phone_primary": phone},
+                                           {"password_hash": 1, "is_admin": 1, "full_name": 1, "email": 1})
+    if not user or not verify_password(body.password, user["password_hash"]):
+        # Generic reply — never reveal whether an account exists.
+        raise HTTPException(401, "Email, password au namba haiko sahihi")
+    if not user.get("is_admin"):
+        raise HTTPException(403, "Email verification ni kwa admins tu")
+    if user.get("status") == "disabled":
+        raise HTTPException(403, "Account disabled — wasiliana na admin")
+
+    # Attach email (may be the first time for legacy admin accounts). The unique
+    # sparse index enforces the one-account-per-email rule — catch the race.
+    try:
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"email": email}})
+    except DuplicateKeyError:
+        raise HTTPException(409, "Email hii inatumiwa na akaunti nyingine")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    now = datetime.now(timezone.utc)
+    await db.email_verifications.update_one(
+        {"user_id": user["_id"]},
+        {"$set": {"user_id": user["_id"], "email": email,
+                  "code_hash": hash_password(code),
+                  "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
+                  "created_at": now, "used": False}}, upsert=True,
+    )
+    logger.warning(f"✉️  Email verification code for {email} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
+    publish(TOPIC_EMAIL_VERIFICATION_REQUESTED, {
+        "event": "email.verification_requested", "user_id": str(user["_id"]),
+        "email": email, "occurred_at": now.isoformat(),
+    })
+    return {"ok": True, "message": f"Code ya uthibitisho imetumwa kwa {email}. Halali dakika {RESET_CODE_TTL_MINUTES}."}
+
+
+@router.post("/email/verify")
+async def confirm_email_verification(body: EmailConfirmRequest, request: Request):
+    """Submit the 6-digit code to mark the email as verified."""
+    try:
+        email = normalize_email(body.email)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    # Brute-force protection: a 6-digit code must not be guessable without limit.
+    rate_limited(f"emailconfirm:{email}:{client_ip(request)}")
+    db = get_db()
+    user = await db.users.find_one({"email": email}, {"_id": 1, "is_admin": 1})
+    if not user:
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    rec = await db.email_verifications.find_one({"user_id": user["_id"], "used": False})
+    if not rec:
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    expires = rec["expires_at"]
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(400, "Code imekwisha muda — omba mpya")
+    if not verify_password(body.code, rec["code_hash"]):
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    await db.users.update_one({"_id": user["_id"]},
+                              {"$set": {"email_verified": True, "updated_at": datetime.now(timezone.utc)}})
+    await db.email_verifications.update_one({"_id": rec["_id"]},
+                                            {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
+    clear_attempts(f"emailconfirm:{email}:{client_ip(request)}")
+    publish(TOPIC_EMAIL_VERIFIED, {
+        "event": "email.verified", "user_id": str(user["_id"]),
+        "email": email, "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "email_verified": True, "message": "Email imethibitishwa. Unaweza kuingia sasa."}
+
+
+@router.post("/admin/login", response_model=LoginResponse)
+async def admin_login(body: AdminEmailLoginRequest, request: Request):
+    """Admin logs in with EMAIL + password (never a phone number)."""
+    try:
+        email = normalize_email(body.email)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    key = f"adminlogin:{email}:{client_ip(request)}"
+    rate_limited(key)
+    db = get_db()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(401, "Email au password haiko sahihi")
+    if not user.get("is_admin"):
+        raise HTTPException(403, "Akaunti hii haina haki ya admin")
+    if user.get("status") == "disabled":
+        raise HTTPException(403, "Account disabled — wasiliana na admin")
+    if not user.get("email_verified"):
+        raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+    clear_attempts(key)
+    token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
+    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token)

@@ -2,6 +2,9 @@
 db = db.getSiblingDB('kubadilishana_vituo');
 
 db.users.createIndex({ phone_primary: 1 }, { unique: true });
+db.users.createIndex({ email: 1 }, { unique: true, sparse: true });
+db.email_verifications.createIndex({ user_id: 1 });
+db.email_verifications.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
 db.users.createIndex({ category: 1, cadre_code: 1 });
 db.users.createIndex({ "current_station.region_id": 1, cadre_code: 1 });
 db.users.createIndex({ "desired_destinations.region_id": 1, cadre_code: 1 });

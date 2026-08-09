@@ -16,6 +16,8 @@ from .modules.matches.routes import router as matches_router
 from .modules.messaging.routes import router as messages_router, ws_router
 from .modules.admin.routes import router as admin_router
 from .modules.payments.routes import router as payments_router
+from .modules.notifications.routes import router as notifications_router
+from .modules.announcements.routes import router as announcements_router
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -26,6 +28,9 @@ os.environ["_KV_STARTED_AT"] = datetime.now(timezone.utc).isoformat()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.jwt_secret in ("change-me-in-production", ""):
+        logger.warning("⚠️  JWT_SECRET ni default! Weka env JWT_SECRET kabla ya production — "
+                       "vinginevyo mtu yeyote anaweza kuforge tokens.")
     logger.info(f"Starting backend. MQTT: {settings.mqtt_host}:{settings.mqtt_port}, Mongo: OK")
     try:
         start_subscriber()
@@ -54,10 +59,26 @@ run in the same process for simplicity.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    # Accept any Cloudflare quick-tunnel origin (https://xxxx.trycloudflare.com)
+    # plus localhost variants — otherwise the browser blocks cross-origin
+    # requests and users see "invalid credentials" on the public URL.
+    allow_origin_regex=r"https://.*\.trycloudflare\.com|http://localhost(:\d+)?|https://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """Basic hardening: clickjacking, sniffing, MIME, referrer leaks."""
+    resp = await call_next(request)
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    resp.headers["X-XSS-Protection"] = "1; mode=block"
+    return resp
 
 # All feature routers
 app.include_router(auth_router)
@@ -67,6 +88,8 @@ app.include_router(matches_router)
 app.include_router(messages_router)
 app.include_router(admin_router)
 app.include_router(payments_router)
+app.include_router(notifications_router)
+app.include_router(announcements_router)
 app.include_router(ws_router)  # /ws?token=
 
 

@@ -8,6 +8,7 @@ from ...security import current_user
 from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_USER_PROFILE_UPDATED, TOPIC_USER_STATION_CHANGED, TOPIC_USER_DESTINATION_CHANGED,
+    TOPIC_USER_PREFS_UPDATED,
 )
 from ..auth.schemas import StationInput, DestinationInput
 from ..messaging.ws_manager import manager as ws_manager
@@ -40,6 +41,8 @@ def _to_response(user: dict):
         "full_name": user["full_name"],
         "phone_primary": user["phone_primary"],
         "phone_alt": user.get("phone_alt"),
+        "email": user.get("email"),
+        "email_verified": user.get("email_verified", False),
         "category": user["category"],
         "cadre_code": user["cadre_code"],
         "cadre_display": user.get("cadre_display", user["cadre_code"]),
@@ -102,6 +105,32 @@ async def update_destinations(body: UpdateDestinationsRequest, user=Depends(curr
     })
     fresh = await get_db().users.find_one({"_id": user["_id"]})
     return _to_response(fresh)
+
+
+@router.get("/recent")
+async def recent_users(_=Depends(current_user), limit: int = Query(15, le=50)):
+    """Waliyosajiliwa hivi karibuni — kwa dashboard request feed (Uber-style)."""
+    db = get_db()
+    cur = db.users.find(
+        {"status": "active"},
+        {"full_name": 1, "phone_primary": 1, "cadre_display": 1, "category": 1,
+         "cadre_code": 1, "current_station": 1, "desired_destinations": 1,
+         "created_at": 1, "last_seen_at": 1, "is_admin": 1},
+    ).sort("created_at", -1).limit(limit)
+    out = []
+    async for u in cur:
+        if u.get("is_admin"):
+            continue
+        out.append({
+            "user_id": str(u["_id"]), "full_name": u["full_name"],
+            "phone_primary": u["phone_primary"], "cadre_display": u.get("cadre_display"),
+            "cadre_code": u.get("cadre_code"), "category": u["category"],
+            "current_station": u.get("current_station"),
+            "desired_destinations": u.get("desired_destinations", []),
+            "created_at": u.get("created_at"), "last_seen_at": u.get("last_seen_at"),
+            "online": ws_manager.is_online(str(u["_id"])),
+        })
+    return {"count": len(out), "users": out}
 
 
 @router.get("/online")
@@ -173,9 +202,15 @@ async def get_user_public(user_id: str, _=Depends(current_user)):
 
 @router.put("/me/notification-prefs")
 async def update_prefs(prefs: NotificationPrefs, user=Depends(current_user)):
+    now = datetime.now(timezone.utc)
+    prefs_dump = prefs.model_dump()
     await get_db().users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"notification_prefs": prefs.model_dump(), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {"notification_prefs": prefs_dump, "updated_at": now}},
     )
+    publish(TOPIC_USER_PREFS_UPDATED, {
+        "event": "user.prefs_updated", "user_id": str(user["_id"]),
+        "notification_prefs": prefs_dump, "occurred_at": now.isoformat(),
+    })
     fresh = await get_db().users.find_one({"_id": user["_id"]})
     return _to_response(fresh)

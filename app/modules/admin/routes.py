@@ -1,17 +1,33 @@
 import asyncio
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Literal
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from ...config import settings
 from ...db import get_db
-from ...security import current_admin
+from ...events.publisher import publish
+from ...events.topics import (
+    TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED, TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
+)
+from ...security import current_admin, current_user, _is_valid_object_id
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _escape_regex(q: str) -> str:
+    return re.escape(q)
+
+
+def _as_object_id(user_id: str) -> ObjectId:
+    if not _is_valid_object_id(user_id):
+        raise HTTPException(400, "Invalid user_id")
+    return ObjectId(user_id)
 
 
 @router.get("/stats")
@@ -71,7 +87,7 @@ async def list_users(_=Depends(current_admin),
     if category: qd["category"] = category
     if cadre_code: qd["cadre_code"] = cadre_code
     if region_id: qd["current_station.region_id"] = region_id
-    if q: qd["$or"] = [{"full_name": {"$regex": q, "$options": "i"}}, {"phone_primary": {"$regex": q}}]
+    if q: qd["$or"] = [{"full_name": {"$regex": _escape_regex(q), "$options": "i"}}, {"phone_primary": {"$regex": _escape_regex(q)}}]
     total = await db.users.count_documents(qd)
     cur = db.users.find(qd, {"password_hash": 0}).sort("created_at", -1).skip(skip).limit(limit)
     users = []
@@ -169,10 +185,18 @@ async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(curre
     if not updates:
         raise HTTPException(400, "No changes")
     updates["updated_at"] = datetime.now(timezone.utc)
-    r = await get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
+    oid = _as_object_id(user_id)
+    r = await get_db().users.update_one({"_id": oid}, {"$set": updates})
     if not r.matched_count:
         raise HTTPException(404, "User not found")
-    fresh = await get_db().users.find_one({"_id": ObjectId(user_id)}, {"password_hash": 0})
+    # Emit event so the subscriber recomputes matches when station/destinations/
+    # cadre changed by an admin (previously admin edits silently skipped matching).
+    publish(TOPIC_USER_UPDATED_BY_ADMIN, {
+        "event": "user.updated_by_admin", "user_id": user_id,
+        "changed_fields": [k for k in updates if k not in ("updated_at", "password_hash")],
+        "occurred_at": updates["updated_at"].isoformat(),
+    })
+    fresh = await get_db().users.find_one({"_id": oid}, {"password_hash": 0})
     fresh["_id"] = str(fresh["_id"])
     return fresh
 
@@ -180,26 +204,125 @@ async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(curre
 @router.delete("/users/{user_id}")
 async def admin_delete_user(user_id: str, _=Depends(current_admin)):
     db = get_db()
-    oid = ObjectId(user_id)
+    oid = _as_object_id(user_id)
     r = await db.users.delete_one({"_id": oid})
     if not r.deleted_count:
         raise HTTPException(404, "User not found")
     await db.matches.delete_many({"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]})
     await db.messages.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    publish(TOPIC_USER_DELETED, {
+        "event": "user.deleted", "user_id": user_id,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {"ok": True, "deleted_user_id": user_id}
 
 
 @router.post("/users/{user_id}/grant-admin")
 async def grant_admin(user_id: str, _=Depends(current_admin)):
-    r = await get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": {"is_admin": True}})
+    r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": True}})
     if not r.matched_count: raise HTTPException(404, "User not found")
+    publish(TOPIC_USER_ADMIN_CHANGED, {
+        "event": "user.admin_changed", "user_id": user_id, "is_admin": True,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {"ok": True}
 
 
 @router.post("/users/{user_id}/revoke-admin")
 async def revoke_admin(user_id: str, _=Depends(current_admin)):
-    r = await get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": {"is_admin": False}})
+    r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": False}})
     if not r.matched_count: raise HTTPException(404, "User not found")
+    publish(TOPIC_USER_ADMIN_CHANGED, {
+        "event": "user.admin_changed", "user_id": user_id, "is_admin": False,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True}
+
+
+@router.get("/reports")
+async def reports(_=Depends(current_admin), days: int = Query(30)):
+    """Aggregated reports for admin: revenue, users trend, matches trend, top events."""
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    # Total revenue (approved donations only)
+    rev_agg = await db.payments.aggregate([
+        {"$match": {"status": "approved"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]).to_list(1)
+    total_revenue = rev_agg[0]["total"] if rev_agg else 0
+    paid_count = rev_agg[0]["count"] if rev_agg else 0
+
+    # Revenue per donation purpose
+    per_purpose = []
+    async for r in db.payments.aggregate([
+        {"$match": {"status": "approved"}},
+        {"$group": {"_id": "$purpose", "total": {"$sum": "$amount"}, "n": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]):
+        per_purpose.append({"purpose": r["_id"], "total": r["total"], "count": r["n"]})
+
+    # Users per day (registrations)
+    users_trend = []
+    async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}, "n": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]):
+        users_trend.append({"date": r["_id"], "count": r["n"]})
+
+    # Matches per day
+    matches_trend = []
+    async for r in db.matches.aggregate([
+        {"$match": {"matched_at": {"$gte": since}}},
+        {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$matched_at"}}, "n": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]):
+        matches_trend.append({"date": r["_id"], "count": r["n"]})
+
+    # Top pages (from page_views collection)
+    top_pages = []
+    async for r in db.page_views.aggregate([
+        {"$match": {"visited_at": {"$gte": since}}},
+        {"$group": {"_id": "$path", "n": {"$sum": 1}, "unique_users": {"$addToSet": "$user_id"}}},
+        {"$sort": {"n": -1}},
+        {"$limit": 20},
+    ]):
+        top_pages.append({"path": r["_id"], "views": r["n"], "unique_users": len(r["unique_users"])})
+
+    return {
+        "period_days": days, "since": since.isoformat(),
+        "revenue": {"total_tzs": total_revenue, "paid_count": paid_count, "per_purpose": per_purpose},
+        "users_per_day": users_trend,
+        "matches_per_day": matches_trend,
+        "top_pages": top_pages,
+    }
+
+
+class PageViewIn(BaseModel):
+    path: str
+    referrer: str | None = None
+
+
+@router.post("/page-view")
+async def log_page_view(body: PageViewIn, user=Depends(current_user)):
+    """Frontend calls this on route change. Persisted directly (reliable — the
+    admin reports read `page_views`) AND published as an event for the audit
+    stream / live consumers."""
+    now = datetime.now(timezone.utc)
+    await get_db().page_views.insert_one({
+        "user_id": str(user["_id"]),
+        "user_name": user["full_name"],
+        "path": body.path,
+        "referrer": body.referrer,
+        "visited_at": now,
+    })
+    publish(TOPIC_PAGE_VIEWED, {
+        "event": "page.viewed", "user_id": str(user["_id"]),
+        "user_name": user["full_name"], "path": body.path,
+        "referrer": body.referrer, "occurred_at": now.isoformat(),
+    })
     return {"ok": True}
 
 

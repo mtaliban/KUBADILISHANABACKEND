@@ -1,9 +1,15 @@
+import re
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from ...db import get_db
 from ...cache import cached
 
 router = APIRouter(tags=["locations"])
+
+
+def _escape_regex(q: str) -> str:
+    """Escape user input used inside a MongoDB $regex (prevents ReDoS/injection)."""
+    return re.escape(q)
 
 
 @router.get("/locations/regions")
@@ -37,14 +43,14 @@ async def list_facilities_in_district(
     if category == "education":
         query = {"district_id": district_id}
         if level: query["level"] = level
-        if q: query["name"] = {"$regex": q, "$options": "i"}
+        if q: query["name"] = {"$regex": _escape_regex(q), "$options": "i"}
         cursor = db.schools.find(query, {"_id": 0, "id": 1, "name": 1, "school_code": 1, "level": 1, "ownership": 1}).sort("name", 1).limit(limit)
         return [d async for d in cursor]
 
     district = await db.districts.find_one({"id": district_id}, {"_id": 0, "name": 1})
     if not district: raise HTTPException(404, "District not found")
     query = {"district": district["name"]}
-    if q: query["name"] = {"$regex": q, "$options": "i"}
+    if q: query["name"] = {"$regex": _escape_regex(q), "$options": "i"}
     cursor = db.health_facilities.find(query, {"_id": 0, "code": 1, "name": 1, "type": 1, "type_category": 1, "ownership_category": 1, "status": 1}).sort("name", 1).limit(limit)
     return [d async for d in cursor]
 
@@ -61,13 +67,13 @@ async def list_facilities_in_region(
     if category == "education":
         query = {"region_id": region_id}
         if level: query["level"] = level
-        if q: query["name"] = {"$regex": q, "$options": "i"}
+        if q: query["name"] = {"$regex": _escape_regex(q), "$options": "i"}
         cursor = db.schools.find(query, {"_id": 0, "id": 1, "name": 1, "school_code": 1, "district_name": 1, "level": 1}).sort("name", 1).limit(limit)
         return [d async for d in cursor]
     region = await db.regions.find_one({"id": region_id}, {"_id": 0, "name": 1})
     if not region: raise HTTPException(404, "Region not found")
     query = {"region": region["name"]}
-    if q: query["name"] = {"$regex": q, "$options": "i"}
+    if q: query["name"] = {"$regex": _escape_regex(q), "$options": "i"}
     cursor = db.health_facilities.find(query, {"_id": 0, "code": 1, "name": 1, "district": 1, "type": 1, "type_category": 1}).sort("name", 1).limit(limit)
     return [d async for d in cursor]
 

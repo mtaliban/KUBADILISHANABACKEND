@@ -68,3 +68,26 @@ class ResetPasswordRequest(BaseModel):
     phone: str
     code: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=6, max_length=128)
+
+
+class AdminEmailLoginRequest(BaseModel):
+    """Admin login — email + password (admins do NOT log in with a phone)."""
+    email: str
+    password: str
+
+
+class EmailVerifyRequest(BaseModel):
+    """Attach + verify the admin's own email.
+
+    `phone` identifies the existing account and `password` proves ownership so
+    the first admin (created before emails existed) can self-enrol.
+    """
+    email: str
+    password: str
+    phone: str | None = None
+
+
+class EmailConfirmRequest(BaseModel):
+    """Submit the 6-digit code received for the target email."""
+    email: str
+    code: str = Field(..., min_length=6, max_length=6)

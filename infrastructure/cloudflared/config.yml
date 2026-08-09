@@ -1,0 +1,42 @@
+# Cloudflare Tunnel config — inaweka app yako kwenye internet (FREE).
+#
+# HATUA ZA KUSAJILI:
+#   1. docker exec kv_cloudflared cloudflared tunnel login
+#      (fungua link inayotokea kwenye browser → chagua domain → Allow)
+#   2. Replace "YOUR-TUNNEL-UUID" hapa chini na tunnel ID (tazama:
+#      docker exec kv_cloudflared cloudflared tunnel list)
+#   3. docker exec kv_cloudflared cloudflared tunnel route dns <TUNNEL-ID> app
+#      (unde <TUNNEL-ID> ni ID, na unaweza kuwa na subdomains nyingi)
+#   4. docker compose restart cloudflared
+#
+# Kwa quick test bila domain unaweza ku-run:
+#   docker run --rm -it --network host cloudflare/cloudflared tunnel --url http://localhost:3000
+tunnel: YOUR-TUNNEL-UUID
+credentials-file: /etc/cloudflared/YOUR-TUNNEL-UUID.json
+
+ingress:
+  # App yako (frontend)
+  - hostname: app.kubadilishana.go.tz
+    service: http://frontend:3000
+
+  # Backend API (Swagger docs ziko hapa)
+  - hostname: api.kubadilishana.go.tz
+    service: http://backend:8000
+
+  # Database UI (mongo-express) — kuona na kumanage database kutoka popote!
+  - hostname: db.kubadilishana.go.tz
+    service: http://mongo-express:8081
+
+  # Monitoring (Grafana)
+  - hostname: monitor.kubadilishana.go.tz
+    service: http://grafana:3000
+
+  # MQTT WebSocket (live events — RequestFeed, notifications, matangazo)
+  # ⚠️ Huu ndio 'ws://localhost:9001' ya local — online ni wss://mqtt.<domain>
+  - hostname: mqtt.kubadilishana.go.tz
+    service: http://mosquitto:9001
+    # cloudflared inaweza kuwa na websocket upgrade ya default — hii inafanya kazi
+    # kwa sababu mqtt.js ina-connect na WebSocket upgrade header.
+
+  # Fallback — yote mengine yafungwe
+  - service: http_status:404
