@@ -112,9 +112,14 @@ jobs:
               echo "::warning::EC2: .env haikuwepo — imenakiliwa kutoka .env.example. Badilisha JWT_SECRET na MQTT_PASSWORD!"
             fi
 
-            # Image ya backend inapull kutoka Docker Hub (mtalibani/kubadilishan:latest)
-            docker compose pull
-            docker compose up -d
+            # Image ya backend inapull kutoka Docker Hub (mtalibani/kubadilishan:latest).
+            # Ikiwa bado haijapushwa (secrets za Docker Hub hazijawekwa), inabuild local.
+            if docker compose pull; then
+              docker compose up -d
+            else
+              echo "::warning::Image haipo kwenye Docker Hub bado — inabuild local. Weka DOCKER_USERNAME + DOCKER_TOKEN secrets."
+              docker compose up -d --build
+            fi
             sleep 5
             echo "=== Health check ==="
             curl -s -o /dev/null -w "health: %{http_code}\n" http://localhost:8000/health || echo "health: unreachable"
