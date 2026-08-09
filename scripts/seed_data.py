@@ -9,8 +9,10 @@ import os
 from pathlib import Path
 from pymongo import MongoClient, ASCENDING
 
-# seed_data.py lives in backend/scripts/. Data is at ../../tanzania_data (repo root).
-ROOT = Path(__file__).resolve().parent.parent.parent
+# seed_data.py lives in backend/scripts/. Data is at the backend repo root
+# (tanzania_data/ + tanzania_health_data/ — reference data included in the repo
+# so every clone/deploy has it). Override with TZ_EDU_DIR/TZ_HEALTH_DIR env vars.
+ROOT = Path(__file__).resolve().parent.parent
 TZ_EDU = Path(os.getenv("TZ_EDU_DIR", ROOT / "tanzania_data" / "json"))
 TZ_HEALTH = Path(os.getenv("TZ_HEALTH_DIR", ROOT / "tanzania_health_data" / "json"))
 

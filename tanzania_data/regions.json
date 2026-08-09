@@ -1,0 +1,106 @@
+[
+  {
+    "id": 1,
+    "name": "Arusha"
+  },
+  {
+    "id": 2,
+    "name": "Coast"
+  },
+  {
+    "id": 3,
+    "name": "Dar Es Salaam"
+  },
+  {
+    "id": 4,
+    "name": "Dodoma"
+  },
+  {
+    "id": 5,
+    "name": "Geita"
+  },
+  {
+    "id": 6,
+    "name": "Iringa"
+  },
+  {
+    "id": 7,
+    "name": "Kagera"
+  },
+  {
+    "id": 8,
+    "name": "Katavi"
+  },
+  {
+    "id": 9,
+    "name": "Kigoma"
+  },
+  {
+    "id": 10,
+    "name": "Kilimanjaro"
+  },
+  {
+    "id": 11,
+    "name": "Lindi"
+  },
+  {
+    "id": 12,
+    "name": "Manyara"
+  },
+  {
+    "id": 13,
+    "name": "Mara"
+  },
+  {
+    "id": 14,
+    "name": "Mbeya"
+  },
+  {
+    "id": 15,
+    "name": "Morogoro"
+  },
+  {
+    "id": 16,
+    "name": "Mtwara"
+  },
+  {
+    "id": 17,
+    "name": "Mwanza"
+  },
+  {
+    "id": 18,
+    "name": "Njombe"
+  },
+  {
+    "id": 19,
+    "name": "Rukwa"
+  },
+  {
+    "id": 20,
+    "name": "Ruvuma"
+  },
+  {
+    "id": 21,
+    "name": "Shinyanga"
+  },
+  {
+    "id": 22,
+    "name": "Simiyu"
+  },
+  {
+    "id": 23,
+    "name": "Singida"
+  },
+  {
+    "id": 24,
+    "name": "Songwe"
+  },
+  {
+    "id": 25,
+    "name": "Tabora"
+  },
+  {
+    "id": 26,
+    "name": "Tanga"
+  }
+]

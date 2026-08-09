@@ -1,0 +1,1130 @@
+[
+  {
+    "id": 1,
+    "name": "Arusha Cc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 2,
+    "name": "Arusha Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 3,
+    "name": "Karatu Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 4,
+    "name": "Longido Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 5,
+    "name": "Meru Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 6,
+    "name": "Monduli Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 7,
+    "name": "Ngorongoro Dc",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 8,
+    "name": "Bagamoyo Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 9,
+    "name": "Chalinze Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 10,
+    "name": "Kibaha Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 11,
+    "name": "Kibaha Tc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 12,
+    "name": "Kibiti Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 13,
+    "name": "Kisarawe Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 14,
+    "name": "Mafia Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 15,
+    "name": "Mkuranga Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 16,
+    "name": "Rufiji Dc",
+    "region_id": 2,
+    "region_name": "Coast"
+  },
+  {
+    "id": 17,
+    "name": "Ilala Mc",
+    "region_id": 3,
+    "region_name": "Dar Es Salaam"
+  },
+  {
+    "id": 18,
+    "name": "Kigamboni Mc",
+    "region_id": 3,
+    "region_name": "Dar Es Salaam"
+  },
+  {
+    "id": 19,
+    "name": "Kinondoni Mc",
+    "region_id": 3,
+    "region_name": "Dar Es Salaam"
+  },
+  {
+    "id": 20,
+    "name": "Temeke Mc",
+    "region_id": 3,
+    "region_name": "Dar Es Salaam"
+  },
+  {
+    "id": 21,
+    "name": "Ubungo Mc",
+    "region_id": 3,
+    "region_name": "Dar Es Salaam"
+  },
+  {
+    "id": 22,
+    "name": "Bahi Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 23,
+    "name": "Chamwino Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 24,
+    "name": "Chemba Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 25,
+    "name": "Dodoma Cc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 26,
+    "name": "Kondoa Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 27,
+    "name": "Kondoa Tc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 28,
+    "name": "Kongwa Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 29,
+    "name": "Mpwapwa Dc",
+    "region_id": 4,
+    "region_name": "Dodoma"
+  },
+  {
+    "id": 30,
+    "name": "Bukombe Dc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 31,
+    "name": "Chato Dc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 32,
+    "name": "Geita Dc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 33,
+    "name": "Geita Tc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 34,
+    "name": "Mbogwe Dc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 35,
+    "name": "Nyanghwale Dc",
+    "region_id": 5,
+    "region_name": "Geita"
+  },
+  {
+    "id": 36,
+    "name": "Iringa Dc",
+    "region_id": 6,
+    "region_name": "Iringa"
+  },
+  {
+    "id": 37,
+    "name": "Iringa Mc",
+    "region_id": 6,
+    "region_name": "Iringa"
+  },
+  {
+    "id": 38,
+    "name": "Kilolo Dc",
+    "region_id": 6,
+    "region_name": "Iringa"
+  },
+  {
+    "id": 39,
+    "name": "Mafinga Tc",
+    "region_id": 6,
+    "region_name": "Iringa"
+  },
+  {
+    "id": 40,
+    "name": "Mufindi Dc",
+    "region_id": 6,
+    "region_name": "Iringa"
+  },
+  {
+    "id": 41,
+    "name": "Biharamulo Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 42,
+    "name": "Bukoba Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 43,
+    "name": "Bukoba Mc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 44,
+    "name": "Karagwe Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 45,
+    "name": "Kyerwa Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 46,
+    "name": "Missenyi Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 47,
+    "name": "Muleba Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 48,
+    "name": "Ngara Dc",
+    "region_id": 7,
+    "region_name": "Kagera"
+  },
+  {
+    "id": 49,
+    "name": "Mlele Dc",
+    "region_id": 8,
+    "region_name": "Katavi"
+  },
+  {
+    "id": 50,
+    "name": "Mpanda Dc",
+    "region_id": 8,
+    "region_name": "Katavi"
+  },
+  {
+    "id": 51,
+    "name": "Mpanda Mc",
+    "region_id": 8,
+    "region_name": "Katavi"
+  },
+  {
+    "id": 52,
+    "name": "Mpimbwe Dc",
+    "region_id": 8,
+    "region_name": "Katavi"
+  },
+  {
+    "id": 53,
+    "name": "Nsimbo Dc",
+    "region_id": 8,
+    "region_name": "Katavi"
+  },
+  {
+    "id": 54,
+    "name": "Buhigwe Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 55,
+    "name": "Kakonko Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 56,
+    "name": "Kasulu Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 57,
+    "name": "Kasulu Tc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 58,
+    "name": "Kibondo Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 59,
+    "name": "Kigoma Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 60,
+    "name": "Kigoma Mc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 61,
+    "name": "Uvinza Dc",
+    "region_id": 9,
+    "region_name": "Kigoma"
+  },
+  {
+    "id": 62,
+    "name": "Hai Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 63,
+    "name": "Moshi Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 64,
+    "name": "Moshi Mc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 65,
+    "name": "Mwanga Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 66,
+    "name": "Rombo Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 67,
+    "name": "Same Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 68,
+    "name": "Siha Dc",
+    "region_id": 10,
+    "region_name": "Kilimanjaro"
+  },
+  {
+    "id": 69,
+    "name": "Kilwa Dc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 70,
+    "name": "Lindi Dc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 71,
+    "name": "Lindi Mc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 72,
+    "name": "Liwale Dc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 73,
+    "name": "Nachingwea Dc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 74,
+    "name": "Ruangwa Dc",
+    "region_id": 11,
+    "region_name": "Lindi"
+  },
+  {
+    "id": 75,
+    "name": "Babati Dc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 76,
+    "name": "Babati Tc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 77,
+    "name": "Hanang Dc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 78,
+    "name": "Kiteto Dc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 79,
+    "name": "Mbulu Dc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 80,
+    "name": "Mbulu Tc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 81,
+    "name": "Simanjiro Dc",
+    "region_id": 12,
+    "region_name": "Manyara"
+  },
+  {
+    "id": 82,
+    "name": "Bunda Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 83,
+    "name": "Bunda Tc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 84,
+    "name": "Butiama Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 85,
+    "name": "Musoma Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 86,
+    "name": "Musoma Mc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 87,
+    "name": "Rorya Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 88,
+    "name": "Serengeti",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 89,
+    "name": "Tarime Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 90,
+    "name": "Tarime Tc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 91,
+    "name": "Busokelo",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 92,
+    "name": "Chunya Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 93,
+    "name": "Kyela Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 94,
+    "name": "Mbarali Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 95,
+    "name": "Mbeya Cc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 96,
+    "name": "Mbeya Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 97,
+    "name": "Rungwe Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 98,
+    "name": "Gairo Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 99,
+    "name": "Ifakara Tc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 100,
+    "name": "Kilombero Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 101,
+    "name": "Kilosa Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 102,
+    "name": "Malinyi Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 103,
+    "name": "Morogoro Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 104,
+    "name": "Morogoro Mc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 105,
+    "name": "Mvomero Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 106,
+    "name": "Ulanga Dc",
+    "region_id": 15,
+    "region_name": "Morogoro"
+  },
+  {
+    "id": 107,
+    "name": "Masasi Dc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 108,
+    "name": "Masasi Tc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 109,
+    "name": "Mtwara Dc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 110,
+    "name": "Mtwara Mc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 111,
+    "name": "Nanyamba Tc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 112,
+    "name": "Nanyumbu Dc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 113,
+    "name": "Newala Dc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 114,
+    "name": "Newala Tc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 115,
+    "name": "Tandahimba Dc",
+    "region_id": 16,
+    "region_name": "Mtwara"
+  },
+  {
+    "id": 116,
+    "name": "Buchosa Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 117,
+    "name": "Ilemela Mc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 118,
+    "name": "Kwimba Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 119,
+    "name": "Magu Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 120,
+    "name": "Misungwi Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 121,
+    "name": "Mwanza Cc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 122,
+    "name": "Sengerema Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 123,
+    "name": "Ukerewe Dc",
+    "region_id": 17,
+    "region_name": "Mwanza"
+  },
+  {
+    "id": 124,
+    "name": "Ludewa Dc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 125,
+    "name": "Makambako Tc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 126,
+    "name": "Makete Dc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 127,
+    "name": "Njombe Dc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 128,
+    "name": "Njombe Tc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 129,
+    "name": "Wangingombe Dc",
+    "region_id": 18,
+    "region_name": "Njombe"
+  },
+  {
+    "id": 130,
+    "name": "Kalambo Dc",
+    "region_id": 19,
+    "region_name": "Rukwa"
+  },
+  {
+    "id": 131,
+    "name": "Nkasi Dc",
+    "region_id": 19,
+    "region_name": "Rukwa"
+  },
+  {
+    "id": 132,
+    "name": "Sumbawanga Dc",
+    "region_id": 19,
+    "region_name": "Rukwa"
+  },
+  {
+    "id": 133,
+    "name": "Sumbawanga Mc",
+    "region_id": 19,
+    "region_name": "Rukwa"
+  },
+  {
+    "id": 134,
+    "name": "Madaba Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 135,
+    "name": "Mbinga Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 136,
+    "name": "Mbinga Tc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 137,
+    "name": "Namtumbo Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 138,
+    "name": "Nyasa Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 139,
+    "name": "Songea Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 140,
+    "name": "Songea Mc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 141,
+    "name": "Tunduru Dc",
+    "region_id": 20,
+    "region_name": "Ruvuma"
+  },
+  {
+    "id": 142,
+    "name": "Kahama Tc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 143,
+    "name": "Kishapu Dc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 144,
+    "name": "Msalala Dc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 145,
+    "name": "Shinyanga Dc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 146,
+    "name": "Shinyanga Mc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 147,
+    "name": "Ushetu Dc",
+    "region_id": 21,
+    "region_name": "Shinyanga"
+  },
+  {
+    "id": 148,
+    "name": "Bariadi Dc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 149,
+    "name": "Bariadi Tc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 150,
+    "name": "Busega Dc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 151,
+    "name": "Itilima Dc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 152,
+    "name": "Maswa Dc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 153,
+    "name": "Meatu Dc",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  },
+  {
+    "id": 154,
+    "name": "Ikungi Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 155,
+    "name": "Iramba Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 156,
+    "name": "Itigi Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 157,
+    "name": "Manyoni Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 158,
+    "name": "Mkalama Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 159,
+    "name": "Singida Dc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 160,
+    "name": "Singida Mc",
+    "region_id": 23,
+    "region_name": "Singida"
+  },
+  {
+    "id": 161,
+    "name": "Ileje Dc",
+    "region_id": 24,
+    "region_name": "Songwe"
+  },
+  {
+    "id": 162,
+    "name": "Mbozi Dc",
+    "region_id": 24,
+    "region_name": "Songwe"
+  },
+  {
+    "id": 163,
+    "name": "Momba Dc",
+    "region_id": 24,
+    "region_name": "Songwe"
+  },
+  {
+    "id": 164,
+    "name": "Songwe Dc",
+    "region_id": 24,
+    "region_name": "Songwe"
+  },
+  {
+    "id": 165,
+    "name": "Tunduma Tc",
+    "region_id": 24,
+    "region_name": "Songwe"
+  },
+  {
+    "id": 166,
+    "name": "Igunga Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 167,
+    "name": "Kaliua Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 168,
+    "name": "Nzega Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 169,
+    "name": "Nzega Tc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 170,
+    "name": "Sikonge Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 171,
+    "name": "Tabora Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 172,
+    "name": "Tabora Mc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 173,
+    "name": "Urambo Dc",
+    "region_id": 25,
+    "region_name": "Tabora"
+  },
+  {
+    "id": 174,
+    "name": "Bumbuli Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 175,
+    "name": "Handeni Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 176,
+    "name": "Handeni Tc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 177,
+    "name": "Kilindi Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 178,
+    "name": "Korogwe Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 179,
+    "name": "Korogwe Tc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 180,
+    "name": "Lushoto Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 181,
+    "name": "Mkinga Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 182,
+    "name": "Muheza Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 183,
+    "name": "Pangani Dc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 184,
+    "name": "Tanga Cc",
+    "region_id": 26,
+    "region_name": "Tanga"
+  },
+  {
+    "id": 185,
+    "name": "Arusha",
+    "region_id": 1,
+    "region_name": "Arusha"
+  },
+  {
+    "id": 186,
+    "name": "Serengeti Dc",
+    "region_id": 13,
+    "region_name": "Mara"
+  },
+  {
+    "id": 187,
+    "name": "Busokelo Dc",
+    "region_id": 14,
+    "region_name": "Mbeya"
+  },
+  {
+    "id": 188,
+    "name": "Maswa",
+    "region_id": 22,
+    "region_name": "Simiyu"
+  }
+]
