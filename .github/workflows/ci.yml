@@ -1,4 +1,10 @@
-name: Backend CI/CD
+name: Backend CI
+
+# ============================================================
+# CI — Backend tests pekee.
+# CD (deploy) ni workflow nyingine ("Backend CD") inayoanza
+# TU baada ya hii kufaulu (workflow_run: completed + success).
+# ============================================================
 
 on:
   push:
@@ -7,11 +13,10 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ============ STEP 1: CI ============
   test:
     name: CI — Backend tests (pytest)
     runs-on: ubuntu-latest
@@ -31,57 +36,3 @@ jobs:
 
       - name: Run pytest
         run: pytest -v --tb=short
-
-  # ============ STEP 2: Docker build + push kwenye Docker Hub ============
-  docker-push:
-    name: CI — Docker build + push (Docker Hub)
-    runs-on: ubuntu-latest
-    needs: test
-    env:
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ env.DOCKER_TOKEN }}
-
-      - name: Build & push image (Docker Hub)
-        if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            mtalibani/kubadilishan:latest
-            mtalibani/kubadilishan:${{ github.sha }}
-
-      - name: Skip notice (Docker Hub secrets bado hazijawekwa)
-        if: ${{ env.DOCKER_USERNAME == '' || env.DOCKER_TOKEN == '' }}
-        run: |
-          echo "::warning::Docker Hub secrets hazijawekwa bado — push imeskipped (hii ni sawa)."
-          echo "Weka DOCKER_USERNAME na DOCKER_TOKEN kwenye:"
-          echo "https://github.com/mtaliban/KUBADILISHANABACKEND/settings/secrets/actions"
-
-  # ============ STEP 3: CD — EC2 ina-pull yenyewe (pull-based deploy) ============
-  # GitHub Actions haiwezi SSH kwenye EC2 (Security Group inaruhusu SSH kutoka IP
-  # yako tu — GitHub runner IPs ni ~7,300 ranges). Kwa hiyo EC2 ina cron script
-  # (/home/ubuntu/kv-deploy.sh) inayoangalia git kila dakika 2: inapoona push mpya,
-  # inapull image ya Docker Hub (mtalibani/kubadilishan:latest) na ku-restart.
-  # Hii job inaonyesha hali — deploy halisi inafanyika kwenye EC2.
-  deploy-status:
-    name: CD — Docker Hub image (EC2 auto-pulls)
-    runs-on: ubuntu-latest
-    needs: docker-push
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    steps:
-      - name: Image iko kwenye Docker Hub — EC2 itapull ndani ya dakika 2
-        run: |
-          echo "Image mpya imepushwa: mtalibani/kubadilishan:latest"
-          echo "EC2 ina-pull yenyewe (cron kila dakika 2): ~/kv-backend + docker compose pull"
-          echo "Angalia: https://hub.docker.com/repository/docker/mtalibani/kubadilishan"

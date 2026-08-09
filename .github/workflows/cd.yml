@@ -1,0 +1,74 @@
+name: Backend CD
+
+# ============================================================
+# CD — Deploy production.
+# Inaanza TU baada ya "Backend CI" kufaulu (workflow_run).
+# Hatua:
+#   1) Docker build + push kwenye Docker Hub (version tags)
+#   2) EC2 ina-pull image yenyewe (cron kv-deploy.sh, dakika 2)
+# ============================================================
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: cd-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  docker-push:
+    name: CD 1/2 — Docker Hub (build + push)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_TOKEN }}
+
+      - name: Build & push image (version tags)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            mtalibani/kubadilishan:latest
+            mtalibani/kubadilishan:${{ github.event.workflow_run.head_sha }}
+            mtalibani/kubadilishan:1.0.${{ github.run_number }}
+
+  # EC2 ina-pull yenyewe (Security Group inaruhusu SSH kutoka IP yako tu —
+  # GitHub runner haiwezi SSH). CD inapopush image, EC2 cron inagundua
+  # digest mpya ndani ya dakika 2 → pull + restart. Hii job inaonesha
+  # kwamba deploy imekamilika upande wa Docker Hub.
+  deploy-ec2:
+    name: CD 2/2 — EC2 deploy (auto-pull)
+    runs-on: ubuntu-latest
+    needs: docker-push
+    steps:
+      - name: Image imepushwa — EC2 itapull ndani ya dakika 2
+        run: |
+          echo "================================================"
+          echo "✅ Image mpya imepushwa kwenye Docker Hub:"
+          echo "   mtalibani/kubadilishan:latest"
+          echo "   mtalibani/kubadilishan:${{ github.event.workflow_run.head_sha }}"
+          echo "   mtalibani/kubadilishan:1.0.${{ github.run_number }}"
+          echo ""
+          echo "🚀 EC2 inaangalia Docker Hub kila dakika 2 (cron kv-deploy.sh)"
+          echo "   → itapata digest mpya → pull + restart backend"
+          echo ""
+          echo "Thibitisha baada ya dakika 2-3:"
+          echo "   ssh ubuntu@16.171.23.21 'docker ps'"
+          echo "   curl http://16.171.23.21:8000/health"
+          echo "================================================"
