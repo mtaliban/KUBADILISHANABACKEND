@@ -46,7 +46,7 @@ async def client(app):
 def _user(phone: str, *, region_id: int, region_name: str, district_id: int = 0,
           district_name: str = "", cadre: str = "CO", cadre_display: str = "Clinical Officer",
           category: str = "health", dest_region_ids: list[int] | None = None,
-          is_admin: bool = False) -> dict:
+          subjects: list[str] | None = None, is_admin: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     dests = [{"region_id": rid, "region_name": f"Reg{rid}", "district_id": None,
               "district_name": None, "facility_id": None, "facility_name": None}
@@ -60,7 +60,7 @@ def _user(phone: str, *, region_id: int, region_name: str, district_id: int = 0,
         "category": category,
         "cadre_code": cadre,
         "cadre_display": cadre_display,
-        "subjects": [],
+        "subjects": subjects or [],
         "current_station": {"region_id": region_id, "region_name": region_name,
                             "district_id": district_id, "district_name": district_name,
                             "facility_id": None, "facility_name": None},
@@ -210,6 +210,47 @@ async def test_board_education_level_filter(app, db, client):
     ids = {c["user_id"] for c in body["candidates"]}
     assert str(primary_dar["_id"]) in ids
     assert str(secondary_dar["_id"]) not in ids  # mwalimu wa sekondari HAYUPO kwa msingi
+
+
+async def test_board_subject_match_education(app, db, client):
+    """Mwalimu wa msingi mwenye masomo (MATH, KISWAHILI) aone walimu wenye
+    ANGALAU somo moja linalofanana — mwenye masomo tofauti ASIONEKANE."""
+    await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
+
+    me = _user("+255711000001", region_id=4, region_name="Dodoma", dest_region_ids=[3],
+               cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+               category="education", subjects=["MATH", "KISWAHILI"])
+    # Dar: ana MATH → anafanana → AONEKANE
+    same_math = _user("+255711000002", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                      cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                      category="education", subjects=["MATH"])
+    # Dar: ana SCIENCE pekee → tofauti → ASIONEKANE
+    diff_science = _user("+255711000003", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                         cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                         category="education", subjects=["SCIENCE"])
+    # Pwani: ana KISWAHILI → anafanana → AONEKANE
+    same_sw = _user("+255711000004", region_id=19, region_name="Pwani", dest_region_ids=[4],
+                    cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                    category="education", subjects=["KISWAHILI"])
+    # Hana masomo → hachujwi (matching.py convention) → AONEKANE
+    no_subjects = _user("+255711000005", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                        cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                        category="education", subjects=[])
+    for u in (me, same_math, diff_science, same_sw, no_subjects):
+        await db.users.insert_one(u)
+    token = create_access_token(str(me["_id"]))
+
+    res = await client.get("/matches/board?scope=incoming", headers=_auth(token))
+    assert res.status_code == 200
+    body = res.json()
+    ids = {c["user_id"] for c in body["candidates"]}
+    assert str(same_math["_id"]) in ids
+    assert str(same_sw["_id"]) in ids
+    assert str(no_subjects["_id"]) in ids
+    assert str(diff_science["_id"]) not in ids  # masomo tofauti kabisa → HAYUPO
+    # candidates wanarudisha subjects (kwa frontend kuonyesha/highlight)
+    math_card = next(c for c in body["candidates"] if c["user_id"] == str(same_math["_id"]))
+    assert math_card["subjects"] == ["MATH"]
 
 
 # ─── /users/me/followed-regions ─────────────────────────────────────

@@ -20,6 +20,15 @@ def _filter(matches, region_id=None, district_id=None, facility_id=None):
     return out
 
 
+def _subjects_overlap(a: list, b: list) -> bool:
+    """Walimu wenye masomo: wanatakiwa wawe na ANGALAU somo moja linalofanana.
+    (Kama mmoja hana masomo → hakuna kizuizi — sawa na matching.py.)"""
+    aa, bb = set(a or []), set(b or [])
+    if aa and bb:
+        return bool(aa & bb)
+    return True
+
+
 @router.get("/me")
 async def my_matches(user=Depends(current_user),
                      region_id: Optional[int] = None, district_id: Optional[int] = None,
@@ -63,6 +72,7 @@ def _candidate_out(u: dict, score: float | None = None) -> dict:
         "cadre_display": u.get("cadre_display"),
         "cadre_code": u.get("cadre_code"),
         "category": u.get("category"),
+        "subjects": u.get("subjects", []),
         "score": score,
         "current_station": u.get("current_station"),
         "desired_destinations": u.get("desired_destinations", []),
@@ -123,6 +133,12 @@ async def board(
         q["current_station.facility_id"] = facility_id
     cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
     raw = [u async for u in cursor]
+
+    # Masomo: mwalimu mwenye masomo aone WALIMU WENYE MASOMO YANAYOLINGANA
+    # (k.m. MATH+KISWAHILI aone wenye MATH au KISWAHILI) — mtu mwenye masomo
+    # tofauti kabisa HAONEKANI. Mtu asiye na masomo hachujwi (matching.py convention).
+    if my_category == "education" and user.get("subjects"):
+        raw = [u for u in raw if _subjects_overlap(user["subjects"], u.get("subjects") or [])]
 
     if scope == "incoming":
         # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako
