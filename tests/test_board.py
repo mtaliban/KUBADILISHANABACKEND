@@ -158,6 +158,37 @@ async def test_board_filters_by_region_district(app, db, client):
     assert r2.json()["candidates"][0]["user_id"] == str(dar_ilala["_id"])
 
 
+async def test_board_filters_by_multiple_regions(app, db, client):
+    """region_ids (comma-separated) — default ya mtumiaji aliyejiandikisha
+    destinations nyingi: anapata wale wanaokuja kwake kutoka MIKOA YOTE
+    aliyojiandikisha (sio ya kwanza tu)."""
+    me = _user("+255711000001", region_id=4, region_name="Dodoma",
+               dest_region_ids=[1, 17])  # nataka kwenda Dar NA Mwanza
+    dar = _user("+255711000002", region_id=1, region_name="Dar Es Salaam", dest_region_ids=[4])
+    mwanza = _user("+255711000003", region_id=17, region_name="Mwanza", dest_region_ids=[4])
+    tabora = _user("+255711000004", region_id=24, region_name="Tabora", dest_region_ids=[4])
+    for u in (me, dar, mwanza, tabora):
+        await db.users.insert_one(u)
+    token = create_access_token(str(me["_id"]))
+
+    # Mikoa miwili (Dar + Mwanza) → wote wawili waonekane, Tabora asionekane
+    r = await client.get("/matches/board?region_ids=1,17", headers=_auth(token))
+    body = r.json()
+    assert body["total"] == 2
+    ids = {c["user_id"] for c in body["candidates"]}
+    assert ids == {str(dar["_id"]), str(mwanza["_id"])}
+
+    # Badili default → Tabora pekee
+    r2 = await client.get("/matches/board?region_ids=24", headers=_auth(token))
+    assert r2.json()["total"] == 1
+    assert r2.json()["candidates"][0]["user_id"] == str(tabora["_id"])
+
+    # region_id (moja) bado inafanya kazi — backward compatible
+    r3 = await client.get("/matches/board?region_id=17", headers=_auth(token))
+    assert r3.json()["total"] == 1
+    assert r3.json()["candidates"][0]["user_id"] == str(mwanza["_id"])
+
+
 # ─── /users/me/followed-regions ─────────────────────────────────────
 
 async def test_followed_regions_get_and_put(app, db, client):

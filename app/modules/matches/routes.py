@@ -76,6 +76,7 @@ async def board(
     user=Depends(current_user),
     scope: Literal["incoming", "all"] = Query("incoming", description="incoming = wanaokuja mkoa wako; all = watumiaji wote"),
     region_id: Optional[int] = None,
+    region_ids: Optional[str] = Query(None, description="comma-separated source region ids (multi-region default)"),
     district_id: Optional[int] = None,
     facility_id: Optional[str] = None,
     limit: int = Query(200, le=1000),
@@ -86,9 +87,10 @@ async def board(
       (wanaotaka kuja kwako, kutoka mikoa unayotaka kwenda).
     - `scope=all`: watumiaji wote wa mfumo (stats za mikoa yao).
 
-    Filters (region_id / district_id / facility_id) zinachuja kwenye
-    **kituo cha sasa** cha mtumiaji (yaani wapi yupo sasa) — kwa hiyo
-    default ya frontend ni kufilter kwa mkoa wa destination yako ya kwanza.
+    Filters (region_ids / region_id / district_id / facility_id) zinachuja
+    kwenye **kituo cha sasa** cha mtumiaji (yaani wapi yupo sasa).
+    `region_ids` inaunga mkono MIKOA MINGI kwa wakati mmoja (default ya
+    mtumiaji aliyejiandikisha destinations nyingi — anapata zote).
     """
     db = get_db()
     my_station = user.get("current_station") or {}
@@ -99,8 +101,13 @@ async def board(
     # ya idara hiyo (usichanganye data za walimu na afya!).
     q: dict = {"status": "active", "is_admin": {"$ne": True},
                "_id": {"$ne": user["_id"]}, "category": my_category}
-    if region_id is not None:
-        q["current_station.region_id"] = region_id
+    region_filter: list[int] = []
+    if region_ids:
+        region_filter = [int(x) for x in region_ids.split(",") if x.strip().lstrip("-").isdigit()]
+    elif region_id is not None:
+        region_filter = [region_id]
+    if region_filter:
+        q["current_station.region_id"] = {"$in": region_filter}
     if district_id is not None:
         q["current_station.district_id"] = district_id
     if facility_id is not None:
