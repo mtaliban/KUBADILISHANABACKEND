@@ -3,7 +3,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, Query
 from ...db import get_db
 from ...security import current_user
-from .matching import find_matches_for_user
+from .matching import find_matches_for_user, _station_satisfies_destination
 from ..messaging.ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/matches", tags=["matches"])
@@ -92,39 +92,47 @@ async def board(
     """
     db = get_db()
     my_station = user.get("current_station") or {}
+    my_category = user.get("category") or "health"
 
     # ── Gather candidates (full set for stats; limited for grid) ──
-    if scope == "all":
-        q = {"status": "active", "is_admin": {"$ne": True}, "_id": {"$ne": user["_id"]}}
-        if region_id is not None:
-            q["current_station.region_id"] = region_id
-        if district_id is not None:
-            q["current_station.district_id"] = district_id
-        if facility_id is not None:
-            q["current_station.facility_id"] = facility_id
-        cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
-        raw = [u async for u in cursor]
-        stat_rows = raw                     # full set → stats kamili
-        candidates = [_candidate_out(u) for u in raw[:limit]]
+    # Idara yangu tu (walimu → elimu, afya → afya) — lakini KADA ZOTE ndani
+    # ya idara hiyo (usichanganye data za walimu na afya!).
+    q: dict = {"status": "active", "is_admin": {"$ne": True},
+               "_id": {"$ne": user["_id"]}, "category": my_category}
+    if region_id is not None:
+        q["current_station.region_id"] = region_id
+    if district_id is not None:
+        q["current_station.district_id"] = district_id
+    if facility_id is not None:
+        q["current_station.facility_id"] = facility_id
+    cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
+    raw = [u async for u in cursor]
+
+    if scope == "incoming":
+        # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako
+        def _wants_to_come(u: dict) -> bool:
+            for d in (u.get("desired_destinations") or []):
+                if _station_satisfies_destination(my_station, d):
+                    return True
+            return False
+        raw = [u for u in raw if _wants_to_come(u)]
+        stat_rows = raw
         stat_total = len(raw)
-    else:
-        matches = await find_matches_for_user(db, user)
-        if region_id is not None or district_id is not None or facility_id is not None:
-            matches = _filter(matches, region_id, district_id, facility_id)
-        stat_rows = [m["candidate"] for m in matches]   # full set → stats kamili
-        stat_total = len(matches)
         candidates = []
-        for m in matches[:limit]:
-            c = m["candidate"]
-            candidates.append({
-                "user_id": c["user_id"], "full_name": c["full_name"],
-                "phone_primary": c.get("phone_primary"),
-                "cadre_display": c.get("cadre_display"), "cadre_code": c.get("cadre_code"),
-                "category": c.get("category"), "score": m["score"],
-                "current_station": c.get("current_station"),
-                "desired_destinations": c.get("desired_destinations", []),
-                "online": ws_manager.is_online(c["user_id"]),
-            })
+        for u in raw[:limit]:
+            score = 0.0
+            for d in (u.get("desired_destinations") or []):
+                if _station_satisfies_destination(my_station, d):
+                    if d.get("facility_id"): score = max(score, 1.0)
+                    elif d.get("district_id"): score = max(score, 0.85)
+                    else: score = max(score, 0.65)
+            c = _candidate_out(u, score)
+            candidates.append(c)
+    else:
+        # Wote wa idara yangu (stats kamili — kada zote, sio kuchanganywa na idara nyingine)
+        stat_rows = raw
+        stat_total = len(raw)
+        candidates = [_candidate_out(u) for u in raw[:limit]]
 
     # ── Stats by region / district / facility (kituo cha sasa cha candidate) ──
     per_r, per_d, per_f = {}, {}, {}

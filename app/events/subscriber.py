@@ -160,10 +160,13 @@ def _relevant_registration_recipients(db, payload: dict) -> list[str]:
     """
     new_station = payload.get("current_station") or {}
     new_region_id = new_station.get("region_id")
+    new_category = payload.get("category")
     new_dest_ids = {d.get("region_id") for d in (payload.get("desired_destinations") or []) if d.get("region_id")}
     if not new_dest_ids:
         return []
     q: dict = {"status": "active", "is_admin": {"$ne": True}}
+    if new_category:
+        q["category"] = new_category  # walimu waone walimu tu, afya waone afya tu
     uid = payload.get("user_id")
     if uid:
         try:

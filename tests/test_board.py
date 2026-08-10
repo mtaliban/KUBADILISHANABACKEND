@@ -1,4 +1,9 @@
-"""Dashboard board (stats ad-board) + followed-regions (fuata mikoa) tests."""
+"""Dashboard board (stats ad-board) + followed-regions (fuata mikoa) tests.
+
+Semantiki: walimu waone stats za elimu pekee, afya waone afya pekee —
+USICHANGANYE idara. Lakini ndani ya idara yake, mtumiaji anaona KADA ZOTE
+(sio kada moja tu).
+"""
 
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -39,8 +44,9 @@ async def client(app):
 
 
 def _user(phone: str, *, region_id: int, region_name: str, district_id: int = 0,
-          district_name: str = "", cadre: str = "CO", category: str = "health",
-          dest_region_ids: list[int] | None = None, is_admin: bool = False) -> dict:
+          district_name: str = "", cadre: str = "CO", cadre_display: str = "Clinical Officer",
+          category: str = "health", dest_region_ids: list[int] | None = None,
+          is_admin: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     dests = [{"region_id": rid, "region_name": f"Reg{rid}", "district_id": None,
               "district_name": None, "facility_id": None, "facility_name": None}
@@ -53,7 +59,7 @@ def _user(phone: str, *, region_id: int, region_name: str, district_id: int = 0,
         "password_hash": hash_password("secret123"),
         "category": category,
         "cadre_code": cadre,
-        "cadre_display": "Clinical Officer" if category == "health" else "Teacher",
+        "cadre_display": cadre_display,
         "subjects": [],
         "current_station": {"region_id": region_id, "region_name": region_name,
                             "district_id": district_id, "district_name": district_name,
@@ -75,15 +81,22 @@ def _auth(token: str) -> dict:
 
 # ─── /matches/board ─────────────────────────────────────────────────
 
-async def test_board_incoming_scope_only_matches(app, db, client):
-    """scope=incoming (default) inarudisha matches halisi tu (same cadre+destinations swap)."""
+async def test_board_incoming_same_category_all_cadres(app, db, client):
+    """Idara yako tu, lakini kada ZOTE wanaotaka kuja mkoa wako."""
     me = _user("+255711000001", region_id=4, region_name="Dodoma", district_id=401,
-               district_name="Chamwino Dc", dest_region_ids=[1])  # nataka kwenda Dar (1)
-    cand_dar = _user("+255711000002", region_id=1, region_name="Dar Es Salaam", district_id=101,
-                     district_name="Ilala Mc", dest_region_ids=[4])  # Dar → nataka Dodoma
-    cand_mwanza = _user("+255711000003", region_id=17, region_name="Mwanza", district_id=1701,
-                        district_name="Nyamagana Dc", dest_region_ids=[4])  # sio swap halisi
-    for u in (me, cand_dar, cand_mwanza):
+               district_name="Chamwino Dc", dest_region_ids=[1])  # CO afya, nataka Dar
+    cand_co = _user("+255711000002", region_id=1, region_name="Dar Es Salaam", district_id=101,
+                    district_name="Ilala Mc", dest_region_ids=[4])  # CO Dar → nataka Dodoma
+    cand_nurse = _user("+255711000003", region_id=1, region_name="Dar Es Salaam", district_id=102,
+                       district_name="Kinondoni Mc", cadre="NO", cadre_display="Nurse Officer",
+                       dest_region_ids=[4])  # KADA TOFAUTI (NO) — bado anaonekana!
+    cand_mwanza = _user("+255711000004", region_id=17, region_name="Mwanza", district_id=1701,
+                        district_name="Nyamagana Dc", dest_region_ids=[4])  # anataka Dodoma pia
+    teacher = _user("+255711000005", region_id=1, region_name="Dar Es Salaam", district_id=101,
+                    district_name="Ilala Mc", cadre="TEACHER_PRIMARY",
+                    cadre_display="Mwalimu wa Elimu ya Msingi", category="education",
+                    dest_region_ids=[4])  # Mwalimu — HAIWEZI KUONEKANA kwa mtumiaji wa afya!
+    for u in (me, cand_co, cand_nurse, cand_mwanza, teacher):
         await db.users.insert_one(u)
     token = create_access_token(str(me["_id"]))
 
@@ -91,30 +104,37 @@ async def test_board_incoming_scope_only_matches(app, db, client):
     assert res.status_code == 200
     body = res.json()
     assert body["scope"] == "incoming"
-    assert body["total"] == 1
-    assert body["candidates"][0]["user_id"] == str(cand_dar["_id"])
+    # CO + Nurse (kada zote za afya wanaotaka Dodoma) — mwanza pia anataka Dodoma
+    assert body["total"] == 3
+    ids = {c["user_id"] for c in body["candidates"]}
+    assert ids == {str(cand_co["_id"]), str(cand_nurse["_id"]), str(cand_mwanza["_id"])}
+    # Hakuna mwalimu (education) kwenye board ya afya
+    assert str(teacher["_id"]) not in ids
     # Stats zinagawanya kwa mkoa/district/wilaya ya candidate
-    assert body["by_region"][0]["region_name"] == "Dar Es Salaam"
-    assert body["by_region"][0]["count"] == 1
+    assert {r["region_name"] for r in body["by_region"]} == {"Dar Es Salaam", "Mwanza"}
     assert any(d["district_name"] == "Ilala Mc" for d in body["by_district"])
 
 
-async def test_board_all_scope_lists_everyone(app, db, client):
+async def test_board_all_scope_same_category_only(app, db, client):
+    """scope=all — watu wa idara yako pekee (sio kuchanganywa na idara nyingine)."""
     me = _user("+255711000001", region_id=4, region_name="Dodoma", dest_region_ids=[1])
     a = _user("+255711000002", region_id=1, region_name="Dar Es Salaam", dest_region_ids=[4])
     b = _user("+255711000003", region_id=17, region_name="Mwanza", dest_region_ids=[4])
-    admin = _user("+255711000004", region_id=4, region_name="Dodoma", is_admin=True)
-    for u in (me, a, b, admin):
+    teacher = _user("+255711000004", region_id=4, region_name="Dodoma",
+                    cadre="TEACHER_PRIMARY", cadre_display="Mwalimu", category="education",
+                    dest_region_ids=[1])
+    admin = _user("+255711000005", region_id=4, region_name="Dodoma", is_admin=True)
+    for u in (me, a, b, teacher, admin):
         await db.users.insert_one(u)
     token = create_access_token(str(me["_id"]))
 
     res = await client.get("/matches/board?scope=all", headers=_auth(token))
     assert res.status_code == 200
     body = res.json()
-    # Wote (isipokuwa admin na mimi) — hata kadha tofauti
+    # Wote wa idara ya AFYA (isipokuwa admin na mimi) — mwalimu HAONEKANI
     assert body["total"] == 2
     assert {c["user_id"] for c in body["candidates"]} == {str(a["_id"]), str(b["_id"])}
-    assert body["by_region"]  # stats za mikoa yao
+    assert body["by_region"]
 
 
 async def test_board_filters_by_region_district(app, db, client):
