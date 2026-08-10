@@ -189,6 +189,29 @@ async def test_board_filters_by_multiple_regions(app, db, client):
     assert r3.json()["candidates"][0]["user_id"] == str(mwanza["_id"])
 
 
+async def test_board_education_level_filter(app, db, client):
+    """Mwalimu wa MSINGI aone walimu wa MSINGI tu (sio sekondari)."""
+    await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
+    await db.cadres.insert_one({"code": "TEACHER_SECONDARY", "category": "education", "level": "Secondary"})
+
+    me = _user("+255711000001", region_id=4, region_name="Dodoma", dest_region_ids=[3],
+               cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi", category="education")
+    primary_dar = _user("+255711000002", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                        cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi", category="education")
+    secondary_dar = _user("+255711000003", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                          cadre="TEACHER_SECONDARY", cadre_display="Mwalimu wa Elimu ya Sekondari",
+                          category="education")
+    for u in (me, primary_dar, secondary_dar):
+        await db.users.insert_one(u)
+    token = create_access_token(str(me["_id"]))
+
+    res = await client.get("/matches/board?scope=all", headers=_auth(token))
+    body = res.json()
+    ids = {c["user_id"] for c in body["candidates"]}
+    assert str(primary_dar["_id"]) in ids
+    assert str(secondary_dar["_id"]) not in ids  # mwalimu wa sekondari HAYUPO kwa msingi
+
+
 # ─── /users/me/followed-regions ─────────────────────────────────────
 
 async def test_followed_regions_get_and_put(app, db, client):

@@ -101,6 +101,15 @@ async def board(
     # ya idara hiyo (usichanganye data za walimu na afya!).
     q: dict = {"status": "active", "is_admin": {"$ne": True},
                "_id": {"$ne": user["_id"]}, "category": my_category}
+    # Mwalimu wa MSINGI aone walimu wa MSINGI tu; sekondari → sekondari tu.
+    # (Afya inaendelea kuona kada zote za afya — usichanganye na elimu.)
+    if my_category == "education":
+        my_cadre = await db.cadres.find_one({"code": user.get("cadre_code"), "category": "education"})
+        lvl = (my_cadre or {}).get("level")
+        if lvl:
+            level_codes = [c["code"] async for c in db.cadres.find({"category": "education", "level": lvl})]
+            if level_codes:
+                q["cadre_code"] = {"$in": level_codes}
     region_filter: list[int] = []
     if region_ids:
         region_filter = [int(x) for x in region_ids.split(",") if x.strip().lstrip("-").isdigit()]
