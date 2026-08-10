@@ -35,6 +35,11 @@ class NotificationPrefs(BaseModel):
     messages: bool = True
 
 
+class FollowedRegionsRequest(BaseModel):
+    """Mikoa ya chanzo ya kufuata kwa notifications/board (default: destination yako)."""
+    region_ids: list[int] = Field(default_factory=list, max_length=31)
+
+
 def _to_response(user: dict):
     return {
         "user_id": str(user["_id"]),
@@ -50,6 +55,7 @@ def _to_response(user: dict):
         "current_station": user["current_station"],
         "desired_destinations": user.get("desired_destinations", []),
         "notification_prefs": user.get("notification_prefs", {"new_matches": True, "messages": True}),
+        "followed_regions": user.get("followed_regions", []),
         "status": user.get("status", "active"),
         "is_verified": user.get("is_verified", False),
         "is_admin": user.get("is_admin", False),
@@ -198,6 +204,27 @@ async def get_user_public(user_id: str, _=Depends(current_user)):
         "last_seen_at": u.get("last_seen_at"),
         "online": ws_manager.is_online(user_id),
     }
+
+
+@router.get("/me/followed-regions")
+async def get_followed_regions(user=Depends(current_user)):
+    """Mikoa ya chanzo user anayofuata (kwa board default + notifications)."""
+    return {"region_ids": user.get("followed_regions", [])}
+
+
+@router.put("/me/followed-regions")
+async def set_followed_regions(body: FollowedRegionsRequest, user=Depends(current_user)):
+    now = datetime.now(timezone.utc)
+    ids = list(dict.fromkeys(body.region_ids))
+    await get_db().users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"followed_regions": ids, "updated_at": now}},
+    )
+    publish(TOPIC_USER_PREFS_UPDATED, {
+        "event": "user.prefs_updated", "user_id": str(user["_id"]),
+        "followed_regions": ids, "occurred_at": now.isoformat(),
+    })
+    return {"region_ids": ids}
 
 
 @router.put("/me/notification-prefs")

@@ -149,6 +149,43 @@ def _match_partners(db, uid: str) -> list[str]:
     return list(partners)
 
 
+def _relevant_registration_recipients(db, payload: dict) -> list[str]:
+    """Who should hear about a new registration.
+
+    Relevant = people whose region the newcomer wants to come to (target)
+    AND the newcomer's CURRENT region is a source they watch:
+      - followed_regions (ikiwa imewekwa) — mikoa waliyoichagua
+      - vinginevyo (default) — mikoa wanayotaka kwenda (desired_destinations)
+      - kama hana destinations wala follows → hupata wale wanaokuja mkoa wake
+    """
+    new_station = payload.get("current_station") or {}
+    new_region_id = new_station.get("region_id")
+    new_dest_ids = {d.get("region_id") for d in (payload.get("desired_destinations") or []) if d.get("region_id")}
+    if not new_dest_ids:
+        return []
+    q: dict = {"status": "active", "is_admin": {"$ne": True}}
+    uid = payload.get("user_id")
+    if uid:
+        try:
+            q["_id"] = {"$ne": ObjectId(uid)}
+        except Exception:
+            pass
+    out: list[str] = []
+    for u in db.users.find(q, {"_id": 1, "current_station": 1,
+                                "desired_destinations": 1, "followed_regions": 1}):
+        st = u.get("current_station") or {}
+        if st.get("region_id") not in new_dest_ids:
+            continue  # mtu mpya hataki kuja mkoa wao
+        watched = u.get("followed_regions") or [
+            d.get("region_id") for d in (u.get("desired_destinations") or []) if d.get("region_id")
+        ]
+        # Hakuna sources zilizowekwa → anapokea wale wanaokuja mkoa wake.
+        # Akiwa na sources (follows/destinations) → chanzo lazima kiwe kati yake.
+        if not watched or (new_region_id in watched):
+            out.append(str(u["_id"]))
+    return out
+
+
 def _generate_notifications(msg, client: mqtt.Client) -> None:
     """Turn events into user-facing notifications (single funnel)."""
     db = get_sync_db()
@@ -176,17 +213,16 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
         name = (u or {}).get("full_name", "Mtumiaji mpya")
         notify(_admin_user_ids(db), "user.registered", f"{name} amejiunga 🎉",
                f"Kada: {payload.get('cadre_code')}", {"user_id": uid})
-        # Wengine wote pia wapate kujua mtumiaji mpya amejiunga (sio admin pekee)
-        all_others = [str(x["_id"]) for x in db.users.find(
-            {"status": "active", "is_admin": {"$ne": True}}, {"_id": 1})]
-        notify([u2 for u2 in all_others if u2 != uid], "user.registered",
+        # Relevant users tu: wale ambao mtu mpya anataka kuja mkoa wao, kutoka
+        # mkoa wa chanzo wanaoufuatia (default = mikoa yao ya destination).
+        relevant = _relevant_registration_recipients(db, payload)
+        notify(relevant, "user.registered",
                f"{name} amejiunga na jukwaa 🎉",
                f"Kada: {payload.get('cadre_code')} — karibu!", {"user_id": uid})
         # Live WS fanout (rich payload) — request feed ya Uber inahitaji data
         # kamili bila MQTT kwenye browser (browser inasikia kupitia WS token).
-        for other in all_others:
-            if other != uid:
-                ws_batch.append((dict(payload), other))
+        for other in relevant:
+            ws_batch.append((dict(payload), other))
     elif topic == TOPIC_MATCH_FOUND:
         a_id, b_id = payload.get("user_a_id"), payload.get("user_b_id")
         score = round(float(payload.get("score") or 0) * 100)

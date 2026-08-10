@@ -58,6 +58,7 @@ class LoginResponse(BaseModel):
     full_name: str
     access_token: str
     token_type: str = "bearer"
+    is_admin: bool = False
 
 
 class ForgotPasswordRequest(BaseModel):

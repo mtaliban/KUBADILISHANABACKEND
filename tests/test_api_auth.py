@@ -148,6 +148,50 @@ async def test_login_normalizes_international_phone(client, db):
     assert res.status_code == 200
 
 
+async def test_login_with_alt_phone(client, db):
+    """Mtumiaji aliye na namba mbili anaweza kuingia kwa namba ya pili (phone_alt)."""
+    await db.cadres.insert_many(seed_cadres(db))
+    await client.post("/auth/register", json=register_payload(
+        phone_primary="0712345678", phone_alt="0623456789"))
+
+    # Login kupitia phone_alt inafanya kazi
+    res = await client.post("/auth/login",
+                            json={"phone": "0623456789", "password": "siri-kali"})
+    assert res.status_code == 200
+    assert res.json()["access_token"]
+    assert res.json()["full_name"] == "Kieffer Madyedye"
+    assert res.json()["is_admin"] is False
+
+    # Password mbovu kwenye alt → 401
+    bad = await client.post("/auth/login",
+                            json={"phone": "0623456789", "password": "nope"})
+    assert bad.status_code == 401
+
+
+async def test_login_with_email_detects_admin(client, db):
+    """Form moja: kuingiza email kunadetect admin login moja kwa moja."""
+    await db.cadres.insert_many(seed_cadres(db))
+    await client.post("/auth/register", json=register_payload())
+    await db.users.update_one(
+        {"phone_primary": "+255712345678"},
+        {"$set": {"is_admin": True, "email": "admin@test.go.tz", "email_verified": True}},
+    )
+
+    res = await client.post("/auth/login",
+                            json={"phone": "admin@test.go.tz", "password": "siri-kali"})
+    assert res.status_code == 200
+    assert res.json()["is_admin"] is True
+
+    # Email ambayo si ya admin → inakataliwa na haki ya admin
+    await db.users.update_one(
+        {"phone_primary": "+255712345678"},
+        {"$set": {"email_verified": False}},
+    )
+    unverified = await client.post("/auth/login",
+                                   json={"phone": "admin@test.go.tz", "password": "siri-kali"})
+    assert unverified.status_code == 403
+
+
 # ─── check-phone ────────────────────────────────────────────────────
 
 async def test_check_phone_availability(client, db):

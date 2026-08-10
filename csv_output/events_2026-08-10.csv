@@ -1,0 +1,3 @@
+occurred_at,topic,event_type,actor_user_id,payload_json
+2026-08-10T04:52:25.229818+00:00,kv/user/presence,user.presence,6a7500ed375c06fddfece2f3,"{""event"": ""user.presence"", ""user_id"": ""6a7500ed375c06fddfece2f3"", ""is_online"": true, ""occurred_at"": ""2026-08-10T04:52:25.138115+00:00""}"
+2026-08-10T04:55:21.692822+00:00,kv/user/presence,user.presence,6a7500ed375c06fddfece2f3,"{""event"": ""user.presence"", ""user_id"": ""6a7500ed375c06fddfece2f3"", ""is_online"": false, ""occurred_at"": ""2026-08-10T04:55:21.685676+00:00""}"

@@ -62,6 +62,7 @@ async def register(body: RegisterRequest, request: Request):
         "desired_destinations": [d.model_dump() for d in body.desired_destinations],
         "status": "active", "is_verified": False, "is_admin": False,
         "notification_prefs": {"new_matches": True, "messages": True},
+        "followed_regions": [],
         "created_at": now, "updated_at": now, "last_seen_at": now,
     }
     try:
@@ -89,15 +90,45 @@ async def register(body: RegisterRequest, request: Request):
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, request: Request):
-    # Brute-force protection: per phone + per IP
+    """Single login form: email auto-detected as ADMIN, phone as regular user.
+
+    Regular users can log in with EITHER phone (primary or alt). Admins must
+    use their verified email — a phone number never grants admin access.
+    """
+    identifier = (body.phone or "").strip()
+    db = get_db()
+
+    # ── Email → admin login (email-verified required) ──
+    if "@" in identifier:
+        try:
+            email = normalize_email(identifier)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        key = f"adminlogin:{email}:{client_ip(request)}"
+        rate_limited(key)
+        user = await db.users.find_one({"email": email})
+        if not user or not verify_password(body.password, user["password_hash"]):
+            raise HTTPException(401, "Email au password haiko sahihi")
+        if not user.get("is_admin"):
+            raise HTTPException(403, "Akaunti hii haina haki ya admin")
+        if user.get("status") == "disabled":
+            raise HTTPException(403, "Account disabled — wasiliana na admin")
+        if not user.get("email_verified"):
+            raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+        clear_attempts(key)
+        token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
+        return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
+                             is_admin=True)
+
+    # ── Phone → regular user login (primary OR alt) ──
     try:
-        phone = normalize_phone(body.phone)
+        phone = normalize_phone(identifier)
     except ValueError as e:
         raise HTTPException(422, str(e))
     key = f"login:{phone}:{client_ip(request)}"
     rate_limited(key)
-    db = get_db()
-    user = await db.users.find_one({"phone_primary": phone})
+    user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]})
     if not user or not verify_password(body.password, user["password_hash"]):
         # Still record the failed attempt (rate_limited was already called)
         raise HTTPException(401, "Invalid credentials")
@@ -105,11 +136,12 @@ async def login(body: LoginRequest, request: Request):
         raise HTTPException(403, "Account disabled — wasiliana na admin")
     # Admins log in with their email — never a phone number.
     if user.get("is_admin"):
-        raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia tab ya 'Admin' kwenye login page.")
+        raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia barua pepe yako ya admin.")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
     clear_attempts(key)
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token)
+    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
+                         is_admin=False)
 
 
 @router.get("/me")
@@ -148,7 +180,8 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request):
         raise HTTPException(422, str(e))
 
     db = get_db()
-    user = await db.users.find_one({"phone_primary": phone}, {"_id": 1, "full_name": 1})
+    user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]},
+                                   {"_id": 1, "full_name": 1})
     # Do NOT reveal whether the account exists
     if user:
         code = f"{secrets.randbelow(1_000_000):06d}"
@@ -178,7 +211,7 @@ async def reset_password(body: ResetPasswordRequest):
     except ValueError as e:
         raise HTTPException(422, str(e))
     db = get_db()
-    user = await db.users.find_one({"phone_primary": phone})
+    user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]})
     if not user:
         raise HTTPException(400, "Code batili au imekwisha muda")
     rec = await db.password_resets.find_one({"user_id": user["_id"], "used": False})
@@ -209,7 +242,8 @@ async def check_phone(phone: str):
         p = normalize_phone(phone)
     except ValueError:
         return {"available": False, "reason": "invalid_format"}
-    exists = await get_db().users.find_one({"phone_primary": p}, {"_id": 1})
+    # Taken if used as primary OR alt on any account.
+    exists = await get_db().users.find_one({"$or": [{"phone_primary": p}, {"phone_alt": p}]}, {"_id": 1})
     return {"available": not exists, "phone_normalized": p}
 
 
