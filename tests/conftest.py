@@ -70,13 +70,3 @@ def published_events(monkeypatch):
     monkeypatch.setattr(auth_routes, "publish", fake_publish)
     return events
 
-
-@pytest.fixture(autouse=True)
-def _reset_rate_limiter():
-    """Rate-limit attempts live in a module-level dict; reset per test so a
-    long suite run never trips the brute-force guard mid-way."""
-    from app import security as _security
-
-    _security._attempts.clear()
-    yield
-    _security._attempts.clear()

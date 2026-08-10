@@ -1,4 +1,4 @@
-"""Security tests: auth guards, JWT edge cases, injection resistance, rate limiting, PII safety."""
+"""Security tests: auth guards, JWT edge cases, injection resistance, PII safety."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from bson import ObjectId
@@ -261,55 +261,6 @@ async def test_chat_history_cannot_read_other_conversation(app, db, client):
     r = await client.get(f"/messages/with/{a['_id']}", headers=_auth(c_tok))
     assert r.status_code == 200
     assert all(m["text"] != "siri kati ya a-b" for m in r.json()["messages"])
-
-
-async def test_untrusted_xff_header_does_not_bypass_rate_limit(app, db, client):
-    """Spoofed X-Forwarded-For must NOT grant a fresh bucket (trust disabled)."""
-    from app import security as sec
-    sec.clear_attempts("testclient")
-    u = _user_doc("0767000050")
-    await db.users.insert_one(u)
-    limit = settings.rate_limit_max
-    last = None
-    # Rotate the XFF header each attempt — must still hit 429 because the
-    # header is ignored and the real client host bucket is shared.
-    for i in range(limit + 2):
-        last = await client.post("/auth/login",
-                                 json={"phone": "0767000050", "password": "wrong"},
-                                 headers={"x-forwarded-for": f"10.0.0.{i}"})
-    assert last.status_code == 429, f"expected 429, got {last.status_code}"
-
-
-# ─── Rate limiting (brute-force protection) ──────────────────────────────
-
-async def test_login_rate_limited(app, db, client, monkeypatch):
-    from app import security as sec
-    # Simulate being behind a trusted proxy so the XFF header is honored.
-    monkeypatch.setattr(settings, "trust_proxy_headers", True)
-    sec.clear_attempts("login:+255767000020:1.2.3.4")
-    u = _user_doc("0767000020")
-    await db.users.insert_one(u)
-    limit = settings.rate_limit_max
-    last = None
-    # (limit + 2) requests: max allowed should be `limit`; request limit+1 → 429
-    for i in range(limit + 2):
-        last = await client.post("/auth/login",
-                                 json={"phone": "0767000020", "password": "wrong"},
-                                 headers={"x-forwarded-for": "1.2.3.4"})
-    assert last.status_code == 429, f"expected 429 after {limit + 2} attempts, got {last.status_code}"
-
-
-async def test_register_rate_limited(app, db, client, monkeypatch):
-    from app import security as sec
-    monkeypatch.setattr(settings, "trust_proxy_headers", True)
-    sec.clear_attempts("register:5.6.7.8")
-    await _seed_cadres(db)
-    limit = settings.rate_limit_max
-    last = None
-    for i in range(limit + 2):
-        last = await client.post("/auth/register", json=await _register_body(f"0767{i:06d}"),
-                                 headers={"x-forwarded-for": "5.6.7.8"})
-    assert last.status_code == 429
 
 
 # ─── PII safety ───────────────────────────────────────────────────────────

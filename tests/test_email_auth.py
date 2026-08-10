@@ -119,27 +119,6 @@ async def test_email_verify_request_and_confirm_flow(app, db, client, captured_e
     assert any(t == TOPIC_EMAIL_VERIFIED for t, _ in captured_events)
 
 
-async def test_email_verify_confirmation_rate_limited(app, db, client, monkeypatch):
-    """6-digit code must not be brute-forceable — verify is rate limited."""
-    from app import security as sec
-    monkeypatch.setattr(auth_routes, "client_ip", lambda req: "9.9.9.9")
-    monkeypatch.setattr(sec, "_attempts", {})
-    admin = _admin_doc(email_verified=False)
-    await db.users.insert_one(admin)
-    now = datetime.now(timezone.utc)
-    await db.email_verifications.insert_one({
-        "user_id": admin["_id"], "email": "admin@kubadilishana.go.tz",
-        "code_hash": hash_password("654321"),
-        "expires_at": now + timedelta(minutes=15), "created_at": now, "used": False,
-    })
-    last = None
-    for _ in range(15):
-        last = await client.post("/auth/email/verify", json={
-            "email": "admin@kubadilishana.go.tz", "code": "999999",
-        })
-    assert last.status_code == 429, f"expected 429 after many wrong codes, got {last.status_code}"
-
-
 async def test_email_verify_request_rejects_wrong_password(app, db, client):
     admin = _admin_doc(email_verified=False)
     await db.users.insert_one(admin)

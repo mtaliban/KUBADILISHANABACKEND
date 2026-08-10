@@ -40,15 +40,6 @@ class Settings(BaseSettings):
     # must be verified by code before admin access is granted.
     admin_email: str = "admin@kubadilishana.go.tz"
 
-    # Brute-force protection (in-memory rate limit).
-    rate_limit_max: int = 10      # max attempts per window
-    rate_limit_window: int = 300  # window in seconds (5 min)
-
-    # Only trust X-Forwarded-For when running behind a proxy that sets it.
-    # Leave False for direct exposure — otherwise clients can spoof the header
-    # and rotate their identity to bypass rate limiting.
-    trust_proxy_headers: bool = False
-
     class Config:
         env_file = ".env"
         case_sensitive = False

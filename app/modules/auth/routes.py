@@ -1,12 +1,12 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 from ...db import get_db
 from ...security import (
     hash_password, verify_password, create_access_token, normalize_phone, normalize_email,
-    current_user, rate_limited, clear_attempts, client_ip,
+    current_user,
 )
 from ...events.publisher import publish
 from ...events.topics import (
@@ -26,11 +26,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, request: Request):
-    # Brute-force protection on account creation per IP.
-    # Intentionally NOT cleared on success: mass account creation from one
-    # address is exactly what this guard limits.
-    rate_limited(f"register:{client_ip(request)}")
+async def register(body: RegisterRequest):
     db = get_db()
     try:
         phone = normalize_phone(body.phone_primary)
@@ -89,7 +85,7 @@ async def register(body: RegisterRequest, request: Request):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, request: Request):
+async def login(body: LoginRequest):
     """Single login form: email auto-detected as ADMIN, phone as regular user.
 
     Regular users can log in with EITHER phone (primary or alt). Admins must
@@ -104,8 +100,6 @@ async def login(body: LoginRequest, request: Request):
             email = normalize_email(identifier)
         except ValueError as e:
             raise HTTPException(422, str(e))
-        key = f"adminlogin:{email}:{client_ip(request)}"
-        rate_limited(key)
         user = await db.users.find_one({"email": email})
         if not user or not verify_password(body.password, user["password_hash"]):
             raise HTTPException(401, "Email au password haiko sahihi")
@@ -116,7 +110,6 @@ async def login(body: LoginRequest, request: Request):
         if not user.get("email_verified"):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
         await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-        clear_attempts(key)
         token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
         return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
                              is_admin=True)
@@ -126,11 +119,8 @@ async def login(body: LoginRequest, request: Request):
         phone = normalize_phone(identifier)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    key = f"login:{phone}:{client_ip(request)}"
-    rate_limited(key)
     user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]})
     if not user or not verify_password(body.password, user["password_hash"]):
-        # Still record the failed attempt (rate_limited was already called)
         raise HTTPException(401, "Invalid credentials")
     if user.get("status") == "disabled":
         raise HTTPException(403, "Account disabled — wasiliana na admin")
@@ -138,7 +128,6 @@ async def login(body: LoginRequest, request: Request):
     if user.get("is_admin"):
         raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia barua pepe yako ya admin.")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-    clear_attempts(key)
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
     return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
                          is_admin=False)
@@ -166,14 +155,12 @@ async def me(user=Depends(current_user)):
 
 
 @router.post("/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest, request: Request):
+async def forgot_password(body: ForgotPasswordRequest):
     """
     Issues a 6-digit reset code, saves it hashed with 15-min TTL.
     DEV: code is logged to backend stdout (view: `docker logs kv_backend`).
     PROD: integrate with SMS provider (Beem Africa / Africa's Talking).
     """
-    # Prevent reset-code spam / phone enumeration brute-force
-    rate_limited(f"forgot:{client_ip(request)}")
     try:
         phone = normalize_phone(body.phone)
     except ValueError as e:
@@ -250,7 +237,7 @@ async def check_phone(phone: str):
 # ─── Admin email login + verification ────────────────────────────────────
 
 @router.post("/email/verify-request")
-async def request_email_verification(body: EmailVerifyRequest, request: Request):
+async def request_email_verification(body: EmailVerifyRequest):
     """Attach + verify the admin's own email.
 
     `phone` identifies the account (first-time enrolment, before email exists),
@@ -258,7 +245,6 @@ async def request_email_verification(body: EmailVerifyRequest, request: Request)
     code is generated (DEV: logged to backend stdout). This is intentionally
     login-free so the very first admin can enrol.
     """
-    rate_limited(f"emailverify:{client_ip(request)}")
     try:
         email = normalize_email(body.email)
     except ValueError as e:
@@ -308,14 +294,12 @@ async def request_email_verification(body: EmailVerifyRequest, request: Request)
 
 
 @router.post("/email/verify")
-async def confirm_email_verification(body: EmailConfirmRequest, request: Request):
+async def confirm_email_verification(body: EmailConfirmRequest):
     """Submit the 6-digit code to mark the email as verified."""
     try:
         email = normalize_email(body.email)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    # Brute-force protection: a 6-digit code must not be guessable without limit.
-    rate_limited(f"emailconfirm:{email}:{client_ip(request)}")
     db = get_db()
     user = await db.users.find_one({"email": email}, {"_id": 1, "is_admin": 1})
     if not user:
@@ -334,7 +318,6 @@ async def confirm_email_verification(body: EmailConfirmRequest, request: Request
                               {"$set": {"email_verified": True, "updated_at": datetime.now(timezone.utc)}})
     await db.email_verifications.update_one({"_id": rec["_id"]},
                                             {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
-    clear_attempts(f"emailconfirm:{email}:{client_ip(request)}")
     publish(TOPIC_EMAIL_VERIFIED, {
         "event": "email.verified", "user_id": str(user["_id"]),
         "email": email, "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -343,14 +326,12 @@ async def confirm_email_verification(body: EmailConfirmRequest, request: Request
 
 
 @router.post("/admin/login", response_model=LoginResponse)
-async def admin_login(body: AdminEmailLoginRequest, request: Request):
+async def admin_login(body: AdminEmailLoginRequest):
     """Admin logs in with EMAIL + password (never a phone number)."""
     try:
         email = normalize_email(body.email)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    key = f"adminlogin:{email}:{client_ip(request)}"
-    rate_limited(key)
     db = get_db()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -362,6 +343,5 @@ async def admin_login(body: AdminEmailLoginRequest, request: Request):
     if not user.get("email_verified"):
         raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-    clear_attempts(key)
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
     return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token)
