@@ -17,3 +17,4 @@ services/analytics-service/csv_output/*.csv
 .DS_Store
 .vscode/
 .idea/
+.venv-test/

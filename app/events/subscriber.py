@@ -167,6 +167,16 @@ def _relevant_registration_recipients(db, payload: dict) -> list[str]:
     q: dict = {"status": "active", "is_admin": {"$ne": True}}
     if new_category:
         q["category"] = new_category  # walimu waone walimu tu, afya waone afya tu
+    # Kadha: mwalimu wa MSINGI asikaribiwe na usajili wa mwalimu wa SEKONDARI
+    # (na kinyume chake) — elimu inachujwa kwa LEVEL ya kada, sawa na board.
+    # Afya bado inaona kada zote za afya (sawasawa na board).
+    if new_category == "education":
+        new_cadre = db.cadres.find_one({"code": payload.get("cadre_code"), "category": "education"})
+        lvl = (new_cadre or {}).get("level")
+        if lvl:
+            level_codes = [c["code"] for c in db.cadres.find({"category": "education", "level": lvl})]
+            if level_codes:
+                q["cadre_code"] = {"$in": level_codes}
     uid = payload.get("user_id")
     if uid:
         try:

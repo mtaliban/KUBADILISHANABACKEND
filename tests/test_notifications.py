@@ -28,6 +28,7 @@ from app.modules.notifications.routes import router as notif_router
 from app.events.topics import (
     TOPIC_MATCH_FOUND, TOPIC_MESSAGE_SENT, TOPIC_CALL_INITIATED,
     TOPIC_PAYMENT_SUBMITTED, TOPIC_PAYMENT_APPROVED, TOPIC_USER_PROFILE_UPDATED,
+    TOPIC_USER_REGISTERED,
 )
 from app.security import create_access_token, hash_password
 
@@ -190,6 +191,87 @@ def test_subscriber_notifies_recipient_on_message_and_call(monkeypatch):
     types = sorted(n["type"] for n in db.notifications.find({}))
     assert types == ["call.initiated", "message.sent"]
     assert all(n["user_id"] == str(me["_id"]) for n in db.notifications.find({}))
+
+
+def test_subscriber_registration_notifies_same_cadre_level_only(monkeypatch):
+    """Mwalimu wa MSINGI asipate notification za usajili wa mwalimu wa SEKONDARI
+    (na kinyume chake) — elimu inachujwa kwa level ya kada."""
+    db = _sub_env(monkeypatch)
+    db.cadres.insert_many([
+        {"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"},
+        {"code": "TEACHER_SECONDARY", "category": "education", "level": "Secondary"},
+    ])
+
+    def _mk(phone, cadre, region_id, dest_ids):
+        now = datetime.now(timezone.utc)
+        return {
+            "_id": ObjectId(), "full_name": f"Mtu {phone}", "phone_primary": phone,
+            "category": "education", "cadre_code": cadre, "status": "active",
+            "current_station": {"region_id": region_id, "region_name": f"R{region_id}"},
+            "desired_destinations": [{"region_id": rid, "region_name": f"R{rid}"}
+                                     for rid in dest_ids],
+            "followed_regions": [], "created_at": now, "updated_at": now,
+        }
+
+    # Dodoma (4) watumiaji: msingi + sekondari — wote wanafuata Dar (3)
+    primary_dodoma = _mk("+255711000011", "TEACHER_PRIMARY", 4, [3])
+    secondary_dodoma = _mk("+255711000012", "TEACHER_SECONDARY", 4, [3])
+    db.users.insert_many([primary_dodoma, secondary_dodoma])
+
+    # Mtu mpya wa MSINGI anatoka Dar (3) anataka kwenda Dodoma (4)
+    payload = {
+        "user_id": str(ObjectId()), "category": "education",
+        "cadre_code": "TEACHER_PRIMARY", "cadre_display": "Mwalimu wa Elimu ya Msingi",
+        "current_station": {"region_id": 3, "region_name": "Dar Es Salaam"},
+        "desired_destinations": [{"region_id": 4, "region_name": "Dodoma"}],
+    }
+    client = _FakeClient()
+    ws_batch: list[tuple[dict, str]] = []
+    monkeypatch.setattr(sub, "_push_batch_to_users", lambda batch: ws_batch.extend(batch))
+
+    sub._generate_notifications(_FakeMsg(TOPIC_USER_REGISTERED, payload), client)
+
+    notifs = list(db.notifications.find({"type": "user.registered"}))
+    nids = {n["user_id"] for n in notifs}
+    # Msingi wa Dodoma ANApokea (kada sawa) — sekondari HAPOKEI
+    assert str(primary_dodoma["_id"]) in nids
+    assert str(secondary_dodoma["_id"]) not in nids
+    ws_users = {uid for _, uid in ws_batch}
+    assert str(primary_dodoma["_id"]) in ws_users
+    assert str(secondary_dodoma["_id"]) not in ws_users
+
+
+def test_subscriber_registration_notifies_health_all_cadres(monkeypatch):
+    """Afya: kada zote za afya zinapokea notification za usajili (sawa na board)."""
+    db = _sub_env(monkeypatch)
+
+    def _mk(phone, cadre, region_id, dest_ids):
+        now = datetime.now(timezone.utc)
+        return {
+            "_id": ObjectId(), "full_name": f"Mtu {phone}", "phone_primary": phone,
+            "category": "health", "cadre_code": cadre, "status": "active",
+            "current_station": {"region_id": region_id, "region_name": f"R{region_id}"},
+            "desired_destinations": [{"region_id": rid, "region_name": f"R{rid}"}
+                                     for rid in dest_ids],
+            "followed_regions": [], "created_at": now, "updated_at": now,
+        }
+
+    co_dodoma = _mk("+255711000013", "CO", 4, [3])
+    no_dodoma = _mk("+255711000014", "NO", 4, [3])
+    db.users.insert_many([co_dodoma, no_dodoma])
+
+    payload = {
+        "user_id": str(ObjectId()), "category": "health", "cadre_code": "RN",
+        "current_station": {"region_id": 3, "region_name": "Dar Es Salaam"},
+        "desired_destinations": [{"region_id": 4, "region_name": "Dodoma"}],
+    }
+    client = _FakeClient()
+    sub._generate_notifications(_FakeMsg(TOPIC_USER_REGISTERED, payload), client)
+
+    notifs = list(db.notifications.find({"type": "user.registered"}))
+    nids = {n["user_id"] for n in notifs}
+    assert str(co_dodoma["_id"]) in nids
+    assert str(no_dodoma["_id"]) in nids  # kada tofauti za afya bado zinaona
 
 
 def test_subscriber_notifies_matches_on_profile_update(monkeypatch):
