@@ -253,8 +253,18 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                (payload.get("text") or "")[:120], {"from_user_id": payload.get("from_user_id")})
     elif topic.startswith(TOPIC_CALL_INITIATED + "/"):
         to_id = topic.rsplit("/", 1)[1]
+        # Weka namba ya mpigaji kwenye data — click ya notification inampigia
+        # moja kwa moja (tel:), siyo kumpeleka tu kwenye chat.
+        caller = None
+        try:
+            caller = db.users.find_one({"_id": ObjectId(payload.get("from_user_id"))},
+                                       {"phone_primary": 1})
+        except Exception:
+            pass
         notify([to_id], "call.initiated", f"{payload.get('from_full_name', 'Mtu')} amekupigia 📞",
-               "Angalia simu yako — mpigie tena", {"from_user_id": payload.get("from_user_id")})
+               "Angalia simu yako — mpigie tena",
+               {"from_user_id": payload.get("from_user_id"),
+                "from_phone": (caller or {}).get("phone_primary")})
     elif topic.startswith(TOPIC_PAYMENT_SUBMITTED + "/"):
         amount = payload.get("amount") or 0
         notify(_admin_user_ids(db), "payment.submitted", "Mchango mpya unahitaji uthibitisho 💰",

@@ -213,26 +213,27 @@ async def test_board_education_level_filter(app, db, client):
 
 
 async def test_board_subject_match_education(app, db, client):
-    """Mwalimu wa msingi mwenye masomo (MATH, KISWAHILI) aone walimu wenye
-    ANGALAU somo moja linalofanana — mwenye masomo tofauti ASIONEKANE."""
+    """MAHITAJI MAPYA (user): mtu aone WOTE wa idara yake hata kama masomo
+    hayakufanana (default). Akiweka subject_match=true → waonekane tu wenye
+    ANGALAU somo moja linalofanana."""
     await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
 
     me = _user("+255711000001", region_id=4, region_name="Dodoma", dest_region_ids=[3],
                cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                category="education", subjects=["MATH", "KISWAHILI"])
-    # Dar: ana MATH → anafanana → AONEKANE
+    # Dar: ana MATH → anafanana
     same_math = _user("+255711000002", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
                       cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                       category="education", subjects=["MATH"])
-    # Dar: ana SCIENCE pekee → tofauti → ASIONEKANE
+    # Dar: ana SCIENCE pekee → masomo tofauti (bado AONEKANE default!)
     diff_science = _user("+255711000003", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
                          cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                          category="education", subjects=["SCIENCE"])
-    # Pwani: ana KISWAHILI → anafanana → AONEKANE
+    # Pwani: ana KISWAHILI → anafanana
     same_sw = _user("+255711000004", region_id=19, region_name="Pwani", dest_region_ids=[4],
                     cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                     category="education", subjects=["KISWAHILI"])
-    # Hana masomo → hachujwi (matching.py convention) → AONEKANE
+    # Hana masomo → hachujwi → AONEKANE kila wakati
     no_subjects = _user("+255711000005", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
                         cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                         category="education", subjects=[])
@@ -240,6 +241,7 @@ async def test_board_subject_match_education(app, db, client):
         await db.users.insert_one(u)
     token = create_access_token(str(me["_id"]))
 
+    # DEFAULT (no subject_match): wote wa idara yake wanaonekana — hata masomo tofauti
     res = await client.get("/matches/board?scope=incoming", headers=_auth(token))
     assert res.status_code == 200
     body = res.json()
@@ -247,9 +249,18 @@ async def test_board_subject_match_education(app, db, client):
     assert str(same_math["_id"]) in ids
     assert str(same_sw["_id"]) in ids
     assert str(no_subjects["_id"]) in ids
-    assert str(diff_science["_id"]) not in ids  # masomo tofauti kabisa → HAYUPO
+    assert str(diff_science["_id"]) in ids  # masomo tofauti BADO anaonekana (idara yake)
+
+    # subject_match=true: diff_science aondoke, waliofanana wabaki
+    res2 = await client.get("/matches/board?scope=incoming&subject_match=true", headers=_auth(token))
+    body2 = res2.json()
+    ids2 = {c["user_id"] for c in body2["candidates"]}
+    assert str(same_math["_id"]) in ids2
+    assert str(same_sw["_id"]) in ids2
+    assert str(no_subjects["_id"]) in ids2
+    assert str(diff_science["_id"]) not in ids2  # subject_match=ON → masomo tofauti HAYUPO
     # candidates wanarudisha subjects (kwa frontend kuonyesha/highlight)
-    math_card = next(c for c in body["candidates"] if c["user_id"] == str(same_math["_id"]))
+    math_card = next(c for c in body2["candidates"] if c["user_id"] == str(same_math["_id"]))
     assert math_card["subjects"] == ["MATH"]
 
 

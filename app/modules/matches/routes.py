@@ -89,6 +89,7 @@ async def board(
     region_ids: Optional[str] = Query(None, description="comma-separated source region ids (multi-region default)"),
     district_id: Optional[int] = None,
     facility_id: Optional[str] = None,
+    subject_match: bool = Query(False, description="true = waone tu walimu wenye masomo yanayofanana; false = waone idara yako wote (default)"),
     limit: int = Query(200, le=1000),
 ):
     """Dashboard stats board (ad-board juu ya dashboard).
@@ -134,10 +135,11 @@ async def board(
     cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
     raw = [u async for u in cursor]
 
-    # Masomo: mwalimu mwenye masomo aone WALIMU WENYE MASOMO YANAYOLINGANA
-    # (k.m. MATH+KISWAHILI aone wenye MATH au KISWAHILI) — mtu mwenye masomo
-    # tofauti kabisa HAONEKANI. Mtu asiye na masomo hachujwi (matching.py convention).
-    if my_category == "education" and user.get("subjects"):
+    # Masomo (OPTIONAL — default HAZICHUJI): mwalimu wa Elimu Msingi aweze
+    # kuwaona wote wa idara yake hata kama masomo hayakufanana. Akipenda,
+    # anaweza kuweka toggle `subject_match=true` ili waonekane tu wenye masomo
+    # yanayolingana (k.m. MATH+KISWAHILI aone wenye MATH au KISWAHILI).
+    if subject_match and my_category == "education" and user.get("subjects"):
         raw = [u for u in raw if _subjects_overlap(user["subjects"], u.get("subjects") or [])]
 
     if scope == "incoming":
