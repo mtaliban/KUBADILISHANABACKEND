@@ -111,8 +111,9 @@ async def login(body: LoginRequest):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
         await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
         token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-        return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
-                             is_admin=True)
+        return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
+                             phone_primary=user.get("phone_primary"), category=user.get("category"),
+                             cadre_code=user.get("cadre_code"), access_token=token, is_admin=True)
 
     # ── Phone → regular user login (primary OR alt) ──
     try:
@@ -129,8 +130,9 @@ async def login(body: LoginRequest):
         raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia barua pepe yako ya admin.")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token,
-                         is_admin=False)
+    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
+                         phone_primary=user.get("phone_primary"), category=user.get("category"),
+                         cadre_code=user.get("cadre_code"), access_token=token, is_admin=False)
 
 
 @router.get("/me")
@@ -344,4 +346,6 @@ async def admin_login(body: AdminEmailLoginRequest):
         raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
     token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"], access_token=token)
+    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
+                         phone_primary=user.get("phone_primary"), category=user.get("category"),
+                         cadre_code=user.get("cadre_code"), access_token=token, is_admin=True)

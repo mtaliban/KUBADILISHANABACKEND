@@ -56,6 +56,9 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     user_id: str
     full_name: str
+    phone_primary: str | None = None
+    category: str | None = None
+    cadre_code: str | None = None
     access_token: str
     token_type: str = "bearer"
     is_admin: bool = False
