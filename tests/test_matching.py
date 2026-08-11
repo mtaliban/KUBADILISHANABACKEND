@@ -136,6 +136,50 @@ def test_score_prefers_most_specific_destination():
     assert match_score(a, b) == 1.0
 
 
+# ─── fix: destination ya WILAYA haifichi mtu wa mkoa ule ule ────────
+
+def test_district_destination_same_region_still_matches():
+    """TATIZO HALISI: mtumiaji wa Dar (Ilala) anataka kwenda Dodoma (Chamwino),
+    na mtumiaji wa Dodoma (Chamwino) anataka kuja Dar (Kigamboni). Wilaya za
+    destinations ni tofauti na stations — lakini MKOA unalingana, basi ni match.
+    (Hapo awali mtu wa Kigamboni hakuonekana kwa mtu wa Ilala — no data.)"""
+    a = make_user(
+        current_station=station(3, "Dar Es Salaam", 17, "Ilala Mc"),
+        desired_destinations=[{"region_id": 4, "region_name": "Dodoma",
+                               "district_id": 23, "district_name": "Chamwino Dc",
+                               "facility_id": None, "facility_name": None}],
+    )
+    b = make_user(
+        current_station=station(4, "Dodoma", 23, "Chamwino Dc"),
+        desired_destinations=[{"region_id": 3, "region_name": "Dar Es Salaam",
+                               "district_id": 18, "district_name": "Kigamboni Mc",
+                               "facility_id": None, "facility_name": None}],
+    )
+    s = match_score(a, b)
+    assert s > 0
+    # a's destination (Chamwino) inatimizwa NA KWELI na station ya b (Chamwino)
+    # → district-level score 0.85. Kinyume chake ni mkoa tu → base 0.5.
+    assert s == 0.85
+
+
+def test_district_destination_different_district_same_region_min_score():
+    """Wilaya zote mbili hazilingani (Chamwino vs Dodoma Cc) — bado match kwa
+    mkoa, score = 0.5 (base region-level), siyo 0.0."""
+    a = make_user(
+        current_station=station(3, "Dar Es Salaam", 17, "Ilala Mc"),
+        desired_destinations=[{"region_id": 4, "region_name": "Dodoma",
+                               "district_id": 23, "district_name": "Chamwino Dc",
+                               "facility_id": None, "facility_name": None}],
+    )
+    b = make_user(
+        current_station=station(4, "Dodoma", 24, "Dodoma Cc"),
+        desired_destinations=[{"region_id": 3, "region_name": "Dar Es Salaam",
+                               "district_id": 18, "district_name": "Kigamboni Mc",
+                               "facility_id": None, "facility_name": None}],
+    )
+    assert match_score(a, b) == 0.5
+
+
 # ─── find_matches_for_user (async, in-memory Mongo) ─────────────────
 
 async def test_find_matches_returns_only_valid_pairs_sorted_by_score(db):

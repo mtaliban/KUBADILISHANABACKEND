@@ -253,6 +253,50 @@ async def test_board_subject_match_education(app, db, client):
     assert math_card["subjects"] == ["MATH"]
 
 
+async def test_board_incoming_district_destination_not_blocked(app, db, client):
+    """TATIZO HALISI (production): mwalimu wa Dar (Ilala) anataka kwenda Dodoma
+    (Chamwino) na mwalimu wa Dodoma (Chamwino) anataka kuja Dar (Kigamboni).
+    Destination za wilaya (Kigamboni) hazifai kuficha mtu kwa mwenyeji wa
+    wilaya nyingine ya mkoa ule ule (Ilala) — anafaa kuonekana kwa MKOA."""
+    await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
+
+    me = _user("+255711000001", region_id=3, region_name="Dar Es Salaam", district_id=17,
+               district_name="Ilala Mc", cadre="TEACHER_PRIMARY",
+               cadre_display="Mwalimu wa Elimu ya Msingi", category="education",
+               subjects=["CHEM", "BIO"], dest_region_ids=[4])  # nataka kwenda Dodoma
+    me["desired_destinations"] = [{"region_id": 4, "region_name": "Dodoma",
+                                   "district_id": 23, "district_name": "Chamwino Dc",
+                                   "facility_id": None, "facility_name": None}]
+
+    dodoma_teacher = _user("+255711000002", region_id=4, region_name="Dodoma", district_id=23,
+                           district_name="Chamwino Dc", cadre="TEACHER_PRIMARY",
+                           cadre_display="Mwalimu wa Elimu ya Msingi", category="education",
+                           subjects=["BIO", "CHEM"], dest_region_ids=[3])  # anataka kuja Dar
+    dodoma_teacher["desired_destinations"] = [{"region_id": 3, "region_name": "Dar Es Salaam",
+                                                "district_id": 18, "district_name": "Kigamboni Mc",
+                                                "facility_id": None, "facility_name": None}]
+    # Mwengine wa Dodoma hataki Dar → asionekane
+    other_dodoma = _user("+255711000003", region_id=4, region_name="Dodoma", district_id=23,
+                         district_name="Chamwino Dc", cadre="TEACHER_PRIMARY",
+                         cadre_display="Mwalimu wa Elimu ya Msingi", category="education",
+                         dest_region_ids=[19])  # anataka kwenda Pwani tu
+    for u in (me, dodoma_teacher, other_dodoma):
+        await db.users.insert_one(u)
+    token = create_access_token(str(me["_id"]))
+
+    res = await client.get("/matches/board?scope=incoming&region_ids=4", headers=_auth(token))
+    assert res.status_code == 200
+    body = res.json()
+    ids = {c["user_id"] for c in body["candidates"]}
+    # Mwalimu wa Dodoma anayetaka kuja Dar (Kigamboni) AONEKANE kwa mwenyeji wa Dar
+    assert str(dodoma_teacher["_id"]) in ids
+    # Asiyetaka kuja Dar asionekane
+    assert str(other_dodoma["_id"]) not in ids
+    # Score ≥ region-level (0.5) — Kigamboni siyo Ilala lakini mkoa ni Dar
+    card = next(c for c in body["candidates"] if c["user_id"] == str(dodoma_teacher["_id"]))
+    assert (card.get("score") or 0) >= 0.5
+
+
 # ─── /users/me/followed-regions ─────────────────────────────────────
 
 async def test_followed_regions_get_and_put(app, db, client):

@@ -3,7 +3,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, Query
 from ...db import get_db
 from ...security import current_user
-from .matching import find_matches_for_user, _station_satisfies_destination
+from .matching import find_matches_for_user, _station_satisfies_destination, _any_in_region
 from ..messaging.ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/matches", tags=["matches"])
@@ -141,18 +141,20 @@ async def board(
         raw = [u for u in raw if _subjects_overlap(user["subjects"], u.get("subjects") or [])]
 
     if scope == "incoming":
-        # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako
+        # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako.
+        # INCLUSION ni kwa MKOA: mtu anayechagua wilaya (k.m. Kigamboni/Dar)
+        # bado anaonekana kwa mwenyeji wa mkoa ule ule (k.m. Ilala/Dar) —
+        # wilaya/kituo vinapunguza SCORE tu, siyo kuonekana kabisa.
         def _wants_to_come(u: dict) -> bool:
-            for d in (u.get("desired_destinations") or []):
-                if _station_satisfies_destination(my_station, d):
-                    return True
-            return False
+            return _any_in_region(my_station, u.get("desired_destinations") or [])
         raw = [u for u in raw if _wants_to_come(u)]
         stat_rows = raw
         stat_total = len(raw)
         candidates = []
         for u in raw[:limit]:
-            score = 0.0
+            # Score: 0.5 = mkoa tu; 0.65 = region-level dest; 0.85 = wilaya sawa;
+            # 1.0 = kituo sawa. (Sawa na matching.match_score.)
+            score = 0.5
             for d in (u.get("desired_destinations") or []):
                 if _station_satisfies_destination(my_station, d):
                     if d.get("facility_id"): score = max(score, 1.0)
