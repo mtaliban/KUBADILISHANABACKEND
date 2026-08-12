@@ -14,10 +14,22 @@ def get_redis() -> Redis:
 
 
 async def cached(key: str, loader: Callable[[], Awaitable[Any]], ttl: int | None = None) -> Any:
-    r = get_redis()
-    val = await r.get(key)
-    if val is not None:
-        return json.loads(val)
+    """Redis cache yenye fallback salama: ikiwa Redis haipo/kushindwa,
+    tunarudi kwenye loader (mikwepo haivunjiki) na tuseti cache —
+    tukirudi mara inayofuata tutajaribu tena. Hii inamanisha caching
+    HAIWEZI kuvunja mfumo wakati wowote."""
+    r = None
+    try:
+        r = get_redis()
+        val = await r.get(key)
+        if val is not None:
+            return json.loads(val)
+    except Exception:
+        r = None  # Redis iko chini — endelea moja kwa moja bila cache
     value = await loader()
-    await r.setex(key, ttl or settings.cache_ttl_seconds, json.dumps(value, default=str))
+    if r is not None:
+        try:
+            await r.setex(key, ttl or settings.cache_ttl_seconds, json.dumps(value, default=str))
+        except Exception:
+            pass  # cache imeshindwa kuandikwa — siyo mbaya, data bado inarudi
     return value

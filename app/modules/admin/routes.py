@@ -23,6 +23,42 @@ from ...cache import get_redis
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+# ─── Redis cache kwa admin data ───────────────────────────────────────────
+# /admin/stats, /admin/reports, /admin/events na /admin/users wanafanya
+# aggregations + queries nzito kwenye DB. Tunacache matokeo kwa sekunde
+# chache (Redis) — kurudi kwenye admin pages hakupigi DB kila mara. Cache
+# inafutwa (bust) kila mutation ya admin (update/delete/grant/clear) ili
+# data ionekane FRESH mara moja. Ikiwa Redis haipo → tunaendelea bila cache
+# (kama cached() kwenye cache.py) — hakuna kuvunjika.
+
+
+async def _cache_get(key: str) -> dict | list | None:
+    try:
+        r = get_redis()
+        v = await r.get(key)
+        return json.loads(v) if v is not None else None
+    except Exception:
+        return None
+
+
+async def _cache_set(key: str, value, ttl: int) -> None:
+    try:
+        r = get_redis()
+        await r.setex(key, ttl, json.dumps(value, default=str))
+    except Exception:
+        pass
+
+
+async def _bust_admin_caches() -> None:
+    try:
+        r = get_redis()
+        keys = [k async for k in r.scan_iter("admin:*")]
+        if keys:
+            await r.delete(*keys)
+    except Exception:
+        pass
+
+
 def _escape_regex(q: str) -> str:
     return re.escape(q)
 
@@ -35,6 +71,9 @@ def _as_object_id(user_id: str) -> ObjectId:
 
 @router.get("/stats")
 async def stats(_=Depends(current_admin)):
+    cached_res = await _cache_get("admin:stats")
+    if cached_res is not None:
+        return cached_res
     db = get_db()
     now = datetime.now(timezone.utc)
     last24 = now - timedelta(hours=24); last7 = now - timedelta(days=7)
@@ -71,7 +110,7 @@ async def stats(_=Depends(current_admin)):
     ]):
         events_by_type.append({"event_type": r["_id"], "count": r["n"]})
 
-    return {
+    result = {
         "totals": {"users": users_total, "users_health": users_health, "users_education": users_edu,
                    "users_verified": users_verified, "users_active_7d": users_active_7d,
                    "matches": matches_total, "matches_24h": matches_24h,
@@ -79,6 +118,8 @@ async def stats(_=Depends(current_admin)):
                    "messages": msgs_total, "calls": calls_total},
         "by_cadre": by_cadre, "by_region": by_region, "events_by_type": events_by_type,
     }
+    await _cache_set("admin:stats", result, 15)
+    return result
 
 
 @router.get("/users")
@@ -86,6 +127,10 @@ async def list_users(_=Depends(current_admin),
                      category: Optional[Literal["health", "education"]] = None,
                      cadre_code: Optional[str] = None, region_id: Optional[int] = None,
                      q: Optional[str] = None, limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
+    cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{q or '-'}:{limit}:{skip}"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     db = get_db(); qd = {}
     if category: qd["category"] = category
     if cadre_code: qd["cadre_code"] = cadre_code
@@ -96,7 +141,9 @@ async def list_users(_=Depends(current_admin),
     users = []
     async for u in cur:
         u["_id"] = str(u["_id"]); users.append(u)
-    return {"total": total, "skip": skip, "limit": limit, "users": users}
+    result = {"total": total, "skip": skip, "limit": limit, "users": users}
+    await _cache_set(cache_key, result, 10)
+    return result
 
 
 @router.get("/matches")
@@ -118,13 +165,19 @@ async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)
 @router.get("/events")
 async def list_events(_=Depends(current_admin), event_type: Optional[str] = None,
                       limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
+    cache_key = f"admin:events:{event_type or '-'}:{limit}:{skip}"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     db = get_db(); q = {"event_type": event_type} if event_type else {}
     total = await db.event_log.count_documents(q)
     cur = db.event_log.find(q).sort("occurred_at", -1).skip(skip).limit(limit)
     events = []
     async for e in cur:
         e["_id"] = str(e["_id"]); events.append(e)
-    return {"total": total, "skip": skip, "limit": limit, "events": events}
+    result = {"total": total, "skip": skip, "limit": limit, "events": events}
+    await _cache_set(cache_key, result, 10)
+    return result
 
 
 @router.get("/csv/list")
@@ -204,6 +257,7 @@ async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(curre
     })
     fresh = await get_db().users.find_one({"_id": oid}, {"password_hash": 0})
     fresh["_id"] = str(fresh["_id"])
+    await _bust_admin_caches()
     return fresh
 
 
@@ -216,6 +270,7 @@ async def admin_delete_user(user_id: str, _=Depends(current_admin)):
         raise HTTPException(404, "User not found")
     await db.matches.delete_many({"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]})
     await db.messages.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    await _bust_admin_caches()
     publish(TOPIC_USER_DELETED, {
         "event": "user.deleted", "user_id": user_id,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -227,6 +282,7 @@ async def admin_delete_user(user_id: str, _=Depends(current_admin)):
 async def grant_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": True}})
     if not r.matched_count: raise HTTPException(404, "User not found")
+    await _bust_admin_caches()
     publish(TOPIC_USER_ADMIN_CHANGED, {
         "event": "user.admin_changed", "user_id": user_id, "is_admin": True,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -238,6 +294,7 @@ async def grant_admin(user_id: str, _=Depends(current_admin)):
 async def revoke_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": False}})
     if not r.matched_count: raise HTTPException(404, "User not found")
+    await _bust_admin_caches()
     publish(TOPIC_USER_ADMIN_CHANGED, {
         "event": "user.admin_changed", "user_id": user_id, "is_admin": False,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -248,6 +305,10 @@ async def revoke_admin(user_id: str, _=Depends(current_admin)):
 @router.get("/reports")
 async def reports(_=Depends(current_admin), days: int = Query(30)):
     """Aggregated reports for admin: revenue, users trend, matches trend, top events."""
+    cache_key = f"admin:reports:{days}"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     db = get_db()
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
@@ -332,7 +393,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     users_by_category = [{"category": "health", "count": await db.users.count_documents({"category": "health"})},
                          {"category": "education", "count": await db.users.count_documents({"category": "education"})}]
 
-    return {
+    result = {
         "period_days": days, "since": since.isoformat(),
         "revenue": {"total_tzs": total_revenue, "paid_count": paid_count, "per_purpose": per_purpose},
         "users_per_day": users_trend,
@@ -344,6 +405,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
         "users_by_status": users_by_status,
         "users_by_category": users_by_category,
     }
+    await _cache_set(cache_key, result, 30)
+    return result
 
 
 # ─── Data management (reference data: mikoa/wilaya/masomo/kada) ───────────
@@ -356,6 +419,7 @@ async def _bust_location_caches() -> None:
         keys = [k async for k in r.scan_iter("locations:*")]
         keys += [k async for k in r.scan_iter("cadres:*")]
         keys += [k async for k in r.scan_iter("subjects:*")]
+        keys += [k async for k in r.scan_iter("admin:*")]
         if keys:
             await r.delete(*keys)
     except Exception:
@@ -630,6 +694,7 @@ async def events_export(_=Depends(current_admin),
 async def events_clear(_=Depends(current_admin)):
     """Futa event_log yote (logs za mfumo) — data ya live haigusiwi."""
     r = await get_db().event_log.delete_many({})
+    await _bust_admin_caches()
     return {"ok": True, "deleted": r.deleted_count}
 
 
@@ -665,6 +730,7 @@ async def cleanup_test_data(_=Depends(current_admin), max_delete: int = Query(50
     del_views = await db.page_views.delete_many({"user_id": {"$in": ids}})
     await db.matches.delete_many({"$or": [{"user_a_id": {"$in": ids}}, {"user_b_id": {"$in": ids}}]})
     await db.notifications.delete_many({"user_id": {"$in": ids}})
+    await _bust_admin_caches()
     return {"ok": True, "deleted_users": del_users.deleted_count,
             "deleted_events": del_events.deleted_count, "deleted_views": del_views.deleted_count}
 

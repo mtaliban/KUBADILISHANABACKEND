@@ -3,8 +3,26 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, Query
 from ...db import get_db
 from ...security import current_user
+from ...cache import get_redis
 from .matching import find_matches_for_user, _station_satisfies_destination, _any_in_region
 from ..messaging.ws_manager import manager as ws_manager
+
+
+async def _board_cache_get(key: str) -> dict | None:
+    try:
+        r = get_redis()
+        v = await r.get(key)
+        return json.loads(v) if v is not None else None
+    except Exception:
+        return None
+
+
+async def _board_cache_set(key: str, value: dict, ttl: int) -> None:
+    try:
+        r = get_redis()
+        await r.setex(key, ttl, json.dumps(value, default=str))
+    except Exception:
+        pass
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
@@ -104,6 +122,13 @@ async def board(
     mtumiaji aliyejiandikisha destinations nyingi — anapata zote).
     """
     db = get_db()
+    # Redis cache (5s) — board ni query nzito (full candidates scan); TTL fupi
+    # inalinda `online` isiwe stale sana. WS events zinabust frontend cache
+    # papo hapo, hivyo board inaonekana LIVE hata ikiwa Redis cache ipo.
+    cache_key = f"board:{user['_id']}:{scope}:{region_ids or ''}:{region_id or ''}:{district_id or ''}:{facility_id or ''}:{subject_match}:{limit}"
+    cached_res = await _board_cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     my_station = user.get("current_station") or {}
     my_category = user.get("category") or "health"
 
@@ -183,7 +208,7 @@ async def board(
             fk = (st.get("facility_id"), st.get("facility_name"), st.get("district_name"), st.get("district_id"))
             per_f[fk] = per_f.get(fk, 0) + 1
 
-    return {
+    result = {
         "scope": scope,
         "total": stat_total,
         "candidates": candidates,
@@ -194,6 +219,8 @@ async def board(
         "by_facility": [{"facility_id": k[0], "facility_name": k[1], "district_name": k[2], "district_id": k[3], "count": v}
                          for k, v in sorted(per_f.items(), key=lambda x: -x[1])],
     }
+    await _board_cache_set(cache_key, result, 5)
+    return result
 
 
 @router.get("/me/cached")
