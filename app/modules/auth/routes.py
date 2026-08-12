@@ -36,10 +36,11 @@ def _issue_token_for(user: dict) -> LoginResponse:
                          is_admin=bool(user.get("is_admin")))
 
 
-async def _create_and_send_otp(user: dict, purpose: str) -> bool:
+async def _create_and_send_otp(user: dict, purpose: str) -> tuple[bool, str]:
     """Generate a 6-digit OTP, store hashed (TTL), and email it to the admin.
-    Returns True if the email was actually delivered; False if no email
-    provider is configured (code logged to stdout for dev)."""
+    Returns (delivered, code): delivered=True if the email was actually
+    delivered; False if no email provider is configured (code logged to
+    stdout — and the caller may surface it via `dev_code` break-glass)."""
     code = f"{secrets.randbelow(1_000_000):06d}"
     now = datetime.now(timezone.utc)
     await get_db().login_otps.update_one(
@@ -59,7 +60,8 @@ async def _create_and_send_otp(user: dict, purpose: str) -> bool:
     else:
         body = "Umeomba kuthibitisha barua pepe yako. Weka code hii hapa chini kwenye mfumo ili uthibitishe."
     cfg = await get_email_config()
-    return await send_email(cfg, user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
+    delivered = await send_email(cfg, user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
+    return delivered, code
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -150,10 +152,18 @@ async def login(body: LoginRequest):
         if not user.get("email_verified"):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
         # Step 1/2 done: email + password sahihi → email the 6-digit OTP.
-        delivered = await _create_and_send_otp(user, "2fa")
-        hint = "" if delivered else " (email haijafika? Weka mipangilio ya SMTP kwenye Admin → Mipangilio)"
-        return {"two_factor_required": True, "email": email,
-                "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}
+        delivered, code = await _create_and_send_otp(user, "2fa")
+        resp: dict = {"two_factor_required": True, "email": email,
+                      "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}."}
+        if not delivered:
+            # Break-glass (SMTP haijasanidiwa): code inaonekana kwenye response
+            # ili admin asiwe amefungiwa nje. SMTP ikishasanidiwa → code hii
+            # haijitokezi kamwe (inaenda email tu) — usalama unarudi kawaida.
+            resp["dev_code"] = code
+            resp["message"] = (f"Code haiwezi kutumwa kwa email kwa sasa (SMTP haijasanidiwa) — "
+                               f"code iko kwenye skrini. Halali dakika {OTP_TTL_MINUTES}. "
+                               "Baada ya kuingia, weka email kwenye Mipangilio.")
+        return resp
 
     # ── Phone → regular user login (primary OR alt) ──
     try:
@@ -417,7 +427,13 @@ async def admin_login(body: AdminEmailLoginRequest):
         raise HTTPException(403, "Account disabled — wasiliana na admin")
     if not user.get("email_verified"):
         raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
-    delivered = await _create_and_send_otp(user, "2fa")
-    hint = "" if delivered else " (email haijafika? Weka mipangilio ya SMTP kwenye Admin → Mipangilio)"
-    return {"two_factor_required": True, "email": email,
-            "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}
+    delivered, code = await _create_and_send_otp(user, "2fa")
+    resp: dict = {"two_factor_required": True, "email": email,
+                  "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}."}
+    if not delivered:
+        # Break-glass (SMTP haijasanidiwa): code inaonekana kwenye response.
+        resp["dev_code"] = code
+        resp["message"] = (f"Code haiwezi kutumwa kwa email kwa sasa (SMTP haijasanidiwa) — "
+                           f"code iko kwenye skrini. Halali dakika {OTP_TTL_MINUTES}. "
+                           "Baada ya kuingia, weka email kwenye Mipangilio.")
+    return resp
