@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Literal
@@ -19,6 +20,7 @@ from ...events.topics import (
 )
 from ...security import current_admin, current_user, _is_valid_object_id, hash_password
 from ...cache import get_redis
+from ...emailer import get_email_config, send_email
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -733,6 +735,78 @@ async def cleanup_test_data(_=Depends(current_admin), max_delete: int = Query(50
     await _bust_admin_caches()
     return {"ok": True, "deleted_users": del_users.deleted_count,
             "deleted_events": del_events.deleted_count, "deleted_views": del_views.deleted_count}
+
+
+# ─── Email settings (admin-configurable — hakuna SSH/git inahitajika) ──────
+# Mipangilio ya SMTP/MailerSend inahifadhiwa kwenye MongoDB (settings collection)
+# na kusomwa na emailer.get_email_config(). Admin anaweza kuweka Gmail App
+# Password yake kwenye /admin/settings na kuthibitisha kwa "Tuma Code ya Majaribio".
+
+
+class EmailSettingsIn(BaseModel):
+    smtp_host: str = ""
+    smtp_port: int = Field(587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+    mailersend_api_key: str = ""
+    mailersend_from: str = ""
+    enabled: bool = True
+
+
+@router.get("/settings/email")
+async def get_email_settings(_=Depends(current_admin)):
+    doc = await get_db().settings.find_one({"key": "email"})
+    base = {
+        "configured": bool(doc and (doc.get("smtp_host") or doc.get("mailersend_api_key"))),
+        "smtp_host": (doc or {}).get("smtp_host", ""),
+        "smtp_port": (doc or {}).get("smtp_port", 587),
+        "smtp_username": (doc or {}).get("smtp_username", ""),
+        "smtp_password": "********" if (doc or {}).get("smtp_password") else "",
+        "smtp_from": (doc or {}).get("smtp_from", settings.smtp_from),
+        "smtp_use_tls": bool((doc or {}).get("smtp_use_tls", True)),
+        "mailersend_api_key": "********" if (doc or {}).get("mailersend_api_key") else "",
+        "mailersend_from": (doc or {}).get("mailersend_from", settings.mailersend_from),
+        "enabled": bool((doc or {}).get("enabled", True)),
+    }
+    return base
+
+
+@router.post("/settings/email")
+async def save_email_settings(body: EmailSettingsIn, _=Depends(current_admin)):
+    db = get_db()
+    existing = await db.settings.find_one({"key": "email"}) or {}
+    data = body.model_dump()
+    # "********" = admin hakuandika upya — weka ile ya zamani (usifute kwa kosa).
+    if data.get("smtp_password") == "********":
+        data["smtp_password"] = existing.get("smtp_password", "")
+    if data.get("mailersend_api_key") == "********":
+        data["mailersend_api_key"] = existing.get("mailersend_api_key", "")
+    data["updated_at"] = datetime.now(timezone.utc)
+    await db.settings.update_one({"key": "email"}, {"$set": data}, upsert=True)
+    await _bust_admin_caches()
+    configured = bool(data.get("smtp_host") or data.get("mailersend_api_key"))
+    return {"ok": True, "configured": configured,
+            "message": "Mipangilio ya email imehifadhiwa ✓"}
+
+
+@router.post("/settings/email/test")
+async def test_email_settings(admin=Depends(current_admin)):
+    """Tuma code ya majaribio kwa email ya admin mwenyewe — uthibitisho wa
+    mipangilio end-to-end (kwa njia ya UI, hakuna SSH)."""
+    admin_email = admin.get("email")
+    if not admin_email:
+        raise HTTPException(400, "Akaunti hii haina email — wasiliana na admin mwenzako.")
+    cfg = await get_email_config()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    ok = await send_email(cfg, admin_email, "Code ya Majaribio — Kubadilishana Vituo",
+                          "Ujumbe wa Majaribio ✅",
+                          f"Habari {admin.get('full_name')}, email iko sawa! Weka code hii kuthibitisha: {code}.",
+                          code)
+    if not ok:
+        raise HTTPException(400, "Email haikutumwa — kagua mipangilio (SMTP host, port, password). Code iko kwenye backend logs.")
+    return {"ok": True, "message": f"Email ya majaribio imetumwa kwa {admin_email} — angalia Inbox na Spam."}
 
 
 class PageViewIn(BaseModel):

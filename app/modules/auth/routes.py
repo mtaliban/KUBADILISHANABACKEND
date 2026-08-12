@@ -19,7 +19,7 @@ from .schemas import (
     AdminEmailLoginRequest, EmailVerifyRequest, EmailConfirmRequest,
     TwoFactorLoginRequest,
 )
-from ...emailer import send_email
+from ...emailer import send_email, get_email_config
 
 logger = logging.getLogger(__name__)
 RESET_CODE_TTL_MINUTES = 15
@@ -55,7 +55,8 @@ async def _create_and_send_otp(user: dict, purpose: str) -> bool:
     body = ("Unaingia kwenye akaunti yako ya ADMIN. Weka code hii hapa chini kwenye mfumo ili ukamilishe kuingia (2FA)."
             if purpose == "2fa" else
             "Umeomba kuthibitisha barua pepe yako ya admin. Weka code hii hapa chini kwenye mfumo ili uthibitishe.")
-    return send_email(user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
+    cfg = await get_email_config()
+    return await send_email(cfg, user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -147,7 +148,7 @@ async def login(body: LoginRequest):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
         # Step 1/2 done: email + password sahihi → email the 6-digit OTP.
         delivered = await _create_and_send_otp(user, "2fa")
-        hint = "" if delivered else " (SMTP haijasanidiwa — angalia backend logs kwa code)"
+        hint = "" if delivered else " (email haijafika? Weka mipangilio ya SMTP kwenye Admin → Mipangilio)"
         return {"two_factor_required": True, "email": email,
                 "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}
 
@@ -320,10 +321,11 @@ async def request_email_verification(body: EmailVerifyRequest):
                   "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
                   "created_at": now, "used": False}}, upsert=True,
     )
-    send_email(email, "Thibitisha Email yako — Kubadilishana Vituo",
-               "Thibitisha Email yako",
-               f"Habari {user['full_name']}, weka code hii kwenye mfumo kuthibitisha barua pepe yako ya admin.",
-               code)
+    cfg = await get_email_config()
+    await send_email(cfg, email, "Thibitisha Email yako — Kubadilishana Vituo",
+                     "Thibitisha Email yako",
+                     f"Habari {user['full_name']}, weka code hii kwenye mfumo kuthibitisha barua pepe yako ya admin.",
+                     code)
     publish(TOPIC_EMAIL_VERIFICATION_REQUESTED, {
         "event": "email.verification_requested", "user_id": str(user["_id"]),
         "email": email, "occurred_at": now.isoformat(),
@@ -413,6 +415,6 @@ async def admin_login(body: AdminEmailLoginRequest):
     if not user.get("email_verified"):
         raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
     delivered = await _create_and_send_otp(user, "2fa")
-    hint = "" if delivered else " (SMTP haijasanidiwa — angalia backend logs kwa code)"
+    hint = "" if delivered else " (email haijafika? Weka mipangilio ya SMTP kwenye Admin → Mipangilio)"
     return {"two_factor_required": True, "email": email,
             "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}

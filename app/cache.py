@@ -9,7 +9,15 @@ _redis: Redis | None = None
 def get_redis() -> Redis:
     global _redis
     if _redis is None:
-        _redis = Redis.from_url(settings.redis_url, decode_responses=True)
+        _redis = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            # Muhimu: ikiwa Redis haipo/hashindikana, tusubiri UCHACHE tu (1-1.5s)
+            # badala ya hang kwa muda mrefu. Vinginevyo kila page ingesubiri
+            # timeout ya mtandao (sekunde 30+) — ndiyo "page inaload sana".
+            socket_connect_timeout=1.0,
+            socket_timeout=1.5,
+        )
     return _redis
 
 
