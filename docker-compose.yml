@@ -67,6 +67,16 @@ services:
       JWT_ALG: HS256
       JWT_EXPIRE_HOURS: 168
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # EMAIL (SMTP/MailerSend) — code za 2FA & email verification hutumwa kwa njia hii.
+      # Weka kwenye .env ya server (sio git!) au Admin → Mipangilio → Mipangilio ya Email.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      MAILERSEND_API_KEY: ${MAILERSEND_API_KEY:-}
+      MAILERSEND_FROM: ${MAILERSEND_FROM:-}
     volumes:
       - ./csv_output:/app/csv_output
     depends_on: [mongodb, mosquitto, redis]
