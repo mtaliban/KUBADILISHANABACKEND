@@ -95,3 +95,9 @@ class EmailConfirmRequest(BaseModel):
     """Submit the 6-digit code received for the target email."""
     email: str
     code: str = Field(..., min_length=6, max_length=6)
+
+
+class TwoFactorLoginRequest(BaseModel):
+    """Second step of admin login — submit the OTP emailed to the admin."""
+    email: str
+    code: str = Field(..., min_length=6, max_length=6)

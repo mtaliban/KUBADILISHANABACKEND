@@ -168,8 +168,10 @@ async def test_login_with_alt_phone(client, db):
     assert bad.status_code == 401
 
 
-async def test_login_with_email_detects_admin(client, db):
-    """Form moja: kuingiza email kunadetect admin login moja kwa moja."""
+async def test_login_with_email_detects_admin_and_requires_2fa(client, db, monkeypatch):
+    """Form moja: email → admin login inahitaji 2FA (code kwa email) kabla ya token."""
+    import app.modules.auth.routes as auth_routes
+    monkeypatch.setattr(auth_routes.secrets, "randbelow", lambda n: 654321)
     await db.cadres.insert_many(seed_cadres(db))
     await client.post("/auth/register", json=register_payload())
     await db.users.update_one(
@@ -177,12 +179,33 @@ async def test_login_with_email_detects_admin(client, db):
         {"$set": {"is_admin": True, "email": "admin@test.go.tz", "email_verified": True}},
     )
 
+    # Step 1: email + password → inahitaji code ya 2FA (HAKUNA token bado)
     res = await client.post("/auth/login",
                             json={"phone": "admin@test.go.tz", "password": "siri-kali"})
     assert res.status_code == 200
+    body = res.json()
+    assert body.get("two_factor_required") is True
+    assert body.get("email") == "admin@test.go.tz"
+    assert "access_token" not in body
+
+    # Step 2: code mbaya → 400
+    bad = await client.post("/auth/login/2fa",
+                            json={"email": "admin@test.go.tz", "code": "000000"})
+    assert bad.status_code == 400
+
+    # Step 2: code sahihi → token inatolewa na is_admin=True
+    res = await client.post("/auth/login/2fa",
+                            json={"email": "admin@test.go.tz", "code": "654321"})
+    assert res.status_code == 200, res.text
+    assert res.json()["access_token"]
     assert res.json()["is_admin"] is True
 
-    # Email ambayo si ya admin → inakataliwa na haki ya admin
+    # Code ni single-use — kuitumia tena inakataliwa
+    reuse = await client.post("/auth/login/2fa",
+                              json={"email": "admin@test.go.tz", "code": "654321"})
+    assert reuse.status_code == 400
+
+    # Email isiyothibitishwa bado inazuia hatua ya kwanza
     await db.users.update_one(
         {"phone_primary": "+255712345678"},
         {"$set": {"email_verified": False}},

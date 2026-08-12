@@ -51,9 +51,21 @@ CADRES = [
     # Elimu
     {"code": "TEACHER_PRIMARY", "category": "education", "display_name": "Mwalimu wa Elimu ya Msingi", "requires_subjects": False, "level": "Primary"},
     {"code": "TEACHER_SECONDARY", "category": "education", "display_name": "Mwalimu wa Elimu ya Sekondari", "requires_subjects": True, "level": "Secondary"},
+    {"code": "TEACHER_SPECIAL", "category": "education", "display_name": "Mwalimu wa Elimu ya Pekee (Special Needs)", "requires_subjects": False, "level": "Primary"},
 ]
 
 SUBJECTS = [
+    # Shule ya MSINGI (Elimu ya Msingi) — Taaluma zote za mtaala wa TZ
+    {"code": "KISW_MSINGI", "name": "Kiswahili (Msingi)", "level": "Primary"},
+    {"code": "ENGLISH_MSINGI", "name": "English (Primary)", "level": "Primary"},
+    {"code": "HISABATI_MSINGI", "name": "Hisabati (Msingi)", "level": "Primary"},
+    {"code": "SAYANSI_MSINGI", "name": "Sayansi na Teknolojia (Msingi)", "level": "Primary"},
+    {"code": "JAMII_MSINGI", "name": "Jamiituni (Msingi)", "level": "Primary"},
+    {"code": "MAZINGIRA_MSINGI", "name": "Mazingira na Ujuzi wa Kuishi (Msingi)", "level": "Primary"},
+    {"code": "URAYA_MSINGI", "name": "Uraia na Maadili (Msingi)", "level": "Primary"},
+    {"code": "MICHEZO_MSINGI", "name": "Michezo na Sanaa (Msingi)", "level": "Primary"},
+    {"code": "DINI_MSINGI", "name": "Elimu ya Dini (Msingi)", "level": "Primary"},
+    # Shule ya SEKONDARI
     {"code": "MATH", "name": "Mathematics", "level": "Secondary"},
     {"code": "PHYS", "name": "Physics", "level": "Secondary"},
     {"code": "CHEM", "name": "Chemistry", "level": "Secondary"},

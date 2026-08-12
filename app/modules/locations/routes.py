@@ -88,7 +88,9 @@ async def list_cadres(category: Optional[Literal["health", "education"]] = Query
 
 
 @router.get("/cadres/subjects")
-async def list_subjects(level: Optional[str] = Query("Secondary")):
+async def list_subjects(level: Optional[str] = Query(None)):
+    """Masomo — bila `level` inarudisha yote (Primary + Secondary); ukibainisha
+    `level=Primary` au `level=Secondary` unapata kiwango hicho tu."""
     key = f"subjects:{level or 'all'}"
     async def _load():
         q = {"level": level} if level else {}

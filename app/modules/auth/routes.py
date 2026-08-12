@@ -17,12 +17,45 @@ from .schemas import (
     RegisterRequest, RegisterResponse, LoginRequest, LoginResponse,
     ForgotPasswordRequest, ResetPasswordRequest,
     AdminEmailLoginRequest, EmailVerifyRequest, EmailConfirmRequest,
+    TwoFactorLoginRequest,
 )
+from ...emailer import send_email
 
 logger = logging.getLogger(__name__)
 RESET_CODE_TTL_MINUTES = 15
+OTP_TTL_MINUTES = 10
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _issue_token_for(user: dict) -> LoginResponse:
+    token = create_access_token(str(user["_id"]), {"category": user.get("category"), "cadre": user.get("cadre_code")})
+    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
+                         phone_primary=user.get("phone_primary"), category=user.get("category"),
+                         cadre_code=user.get("cadre_code"), access_token=token,
+                         is_admin=bool(user.get("is_admin")))
+
+
+async def _create_and_send_otp(user: dict, purpose: str) -> bool:
+    """Generate a 6-digit OTP, store hashed (TTL), and email it to the admin.
+    Returns True if the email was actually delivered; False if no email
+    provider is configured (code logged to stdout for dev)."""
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    now = datetime.now(timezone.utc)
+    await get_db().login_otps.update_one(
+        {"user_id": user["_id"], "purpose": purpose},
+        {"$set": {
+            "user_id": user["_id"], "email": user.get("email"), "purpose": purpose,
+            "code_hash": hash_password(code),
+            "expires_at": now + timedelta(minutes=OTP_TTL_MINUTES),
+            "created_at": now, "used": False, "attempts": 0,
+        }}, upsert=True,
+    )
+    heading = "Code yako ya uthibitisho" if purpose == "2fa" else "Thibitisha Email yako"
+    body = ("Unaingia kwenye akaunti yako ya ADMIN. Weka code hii hapa chini kwenye mfumo ili ukamilishe kuingia (2FA)."
+            if purpose == "2fa" else
+            "Umeomba kuthibitisha barua pepe yako ya admin. Weka code hii hapa chini kwenye mfumo ili uthibitishe.")
+    return send_email(user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -84,17 +117,20 @@ async def register(body: RegisterRequest):
                             category=body.category, cadre_code=body.cadre_code, access_token=token)
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login")
 async def login(body: LoginRequest):
     """Single login form: email auto-detected as ADMIN, phone as regular user.
 
     Regular users can log in with EITHER phone (primary or alt). Admins must
     use their verified email — a phone number never grants admin access.
+    Admin login now uses TWO-FACTOR AUTHENTICATION: correct email+password
+    issues an OTP that is emailed to the admin; the admin submits it via
+    `POST /auth/login/2fa` to receive the access token.
     """
     identifier = (body.phone or "").strip()
     db = get_db()
 
-    # ── Email → admin login (email-verified required) ──
+    # ── Email → admin login (2FA: password step first, OTP emailed next) ──
     if "@" in identifier:
         try:
             email = normalize_email(identifier)
@@ -109,11 +145,11 @@ async def login(body: LoginRequest):
             raise HTTPException(403, "Account disabled — wasiliana na admin")
         if not user.get("email_verified"):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
-        await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-        token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-        return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
-                             phone_primary=user.get("phone_primary"), category=user.get("category"),
-                             cadre_code=user.get("cadre_code"), access_token=token, is_admin=True)
+        # Step 1/2 done: email + password sahihi → email the 6-digit OTP.
+        delivered = await _create_and_send_otp(user, "2fa")
+        hint = "" if delivered else " (SMTP haijasanidiwa — angalia backend logs kwa code)"
+        return {"two_factor_required": True, "email": email,
+                "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}
 
     # ── Phone → regular user login (primary OR alt) ──
     try:
@@ -129,10 +165,7 @@ async def login(body: LoginRequest):
     if user.get("is_admin"):
         raise HTTPException(403, "Admins wanaingia kwa EMAIL. Tumia barua pepe yako ya admin.")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-    token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
-                         phone_primary=user.get("phone_primary"), category=user.get("category"),
-                         cadre_code=user.get("cadre_code"), access_token=token, is_admin=False)
+    return _issue_token_for(user)
 
 
 @router.get("/me")
@@ -287,7 +320,10 @@ async def request_email_verification(body: EmailVerifyRequest):
                   "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
                   "created_at": now, "used": False}}, upsert=True,
     )
-    logger.warning(f"✉️  Email verification code for {email} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
+    send_email(email, "Thibitisha Email yako — Kubadilishana Vituo",
+               "Thibitisha Email yako",
+               f"Habari {user['full_name']}, weka code hii kwenye mfumo kuthibitisha barua pepe yako ya admin.",
+               code)
     publish(TOPIC_EMAIL_VERIFICATION_REQUESTED, {
         "event": "email.verification_requested", "user_id": str(user["_id"]),
         "email": email, "occurred_at": now.isoformat(),
@@ -327,9 +363,41 @@ async def confirm_email_verification(body: EmailConfirmRequest):
     return {"ok": True, "email_verified": True, "message": "Email imethibitishwa. Unaweza kuingia sasa."}
 
 
-@router.post("/admin/login", response_model=LoginResponse)
+@router.post("/login/2fa")
+async def login_2fa(body: TwoFactorLoginRequest):
+    """Second step of admin login: submit the emailed OTP to get the token.
+    Guards against brute-force: max 5 wrong attempts per OTP."""
+    try:
+        email = normalize_email(body.email)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db = get_db()
+    user = await db.users.find_one({"email": email})
+    if not user or not user.get("is_admin"):
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    rec = await db.login_otps.find_one({"user_id": user["_id"], "purpose": "2fa", "used": False})
+    if not rec:
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    expires = rec["expires_at"]
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(400, "Code imekwisha muda — ingia tena kupata code mpya")
+    if (rec.get("attempts") or 0) >= 5:
+        raise HTTPException(429, "Majruba mengi sana — ingia tena kupata code mpya")
+    if not verify_password(body.code, rec["code_hash"]):
+        await db.login_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
+        raise HTTPException(400, "Code batili au imekwisha muda")
+    await db.login_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+    return _issue_token_for(user)
+
+
+@router.post("/admin/login")
 async def admin_login(body: AdminEmailLoginRequest):
-    """Admin logs in with EMAIL + password (never a phone number)."""
+    """Admin logs in with EMAIL + password (never a phone number).
+    (2FA: email+password sahihi → OTP inatumwa kwa email; kamilisha kwa
+    `POST /auth/login/2fa` ili kupata token.)"""
     try:
         email = normalize_email(body.email)
     except ValueError as e:
@@ -344,8 +412,7 @@ async def admin_login(body: AdminEmailLoginRequest):
         raise HTTPException(403, "Account disabled — wasiliana na admin")
     if not user.get("email_verified"):
         raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
-    token = create_access_token(str(user["_id"]), {"category": user["category"], "cadre": user["cadre_code"]})
-    return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
-                         phone_primary=user.get("phone_primary"), category=user.get("category"),
-                         cadre_code=user.get("cadre_code"), access_token=token, is_admin=True)
+    delivered = await _create_and_send_otp(user, "2fa")
+    hint = "" if delivered else " (SMTP haijasanidiwa — angalia backend logs kwa code)"
+    return {"two_factor_required": True, "email": email,
+            "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}.{hint}"}

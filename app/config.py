@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     # must be verified by code before admin access is granted.
     admin_email: str = "admin@kubadilishana.go.tz"
 
+    # Email sending (OTP/2FA + email verification). Works with ANY SMTP
+    # provider (Gmail app-password, MailerSend SMTP, Resend SMTP, Zoho, ...).
+    # If unset, codes are logged to backend stdout (dev mode).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "Kubadilishana Vituo <no-reply@kubadilishana.go.tz>"
+    smtp_use_tls: bool = True
+    # Send-only API key (optional): if SMTP unset but this is set, use
+    # MailerSend REST API (https://developers.mailersend.com) via httpx.
+    mailersend_api_key: str = ""
+    mailersend_from: str = "Kubadilishana Vituo <no-reply@kubadilishana.go.tz>"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

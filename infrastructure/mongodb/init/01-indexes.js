@@ -36,4 +36,27 @@ db.matches.createIndex({ user_a_id: 1, matched_at: -1 });
 db.event_log.createIndex({ event_type: 1, occurred_at: -1 });
 db.event_log.createIndex({ actor_user_id: 1, occurred_at: -1 });
 
+// Performance: pages zinaload haraka (queries za kila siku)
+db.users.createIndex({ created_at: -1 });
+db.users.createIndex({ last_seen_at: -1 });
+db.users.createIndex({ status: 1, category: 1, is_admin: 1, created_at: -1 });
+db.users.createIndex({ "desired_destinations.region_id": 1 });
+
+db.notifications.createIndex({ user_id: 1, created_at: -1 });
+db.notifications.createIndex({ user_id: 1, read: 1 });
+
+db.messages.createIndex({ to_user_id: 1, read: 1 });
+db.messages.createIndex({ conversation_id: 1, created_at: -1 });
+
+db.page_views.createIndex({ visited_at: -1 });
+db.page_views.createIndex({ user_id: 1, visited_at: -1 });
+
+db.login_otps.createIndex({ user_id: 1, purpose: 1 });
+db.login_otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+
+db.call_logs.createIndex({ created_at: -1 });
+db.call_logs.createIndex({ from_user_id: 1, created_at: -1 });
+
+db.payments.createIndex({ status: 1, created_at: -1 });
+
 print('Indexes created.');

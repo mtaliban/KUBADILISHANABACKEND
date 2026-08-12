@@ -157,14 +157,31 @@ async def test_email_verify_rejects_invalid_email_format(app, db, client):
 
 # ─── Admin email login ──────────────────────────────────────────────
 
-async def test_admin_email_login_success(app, db, client):
+async def test_admin_email_login_success_requires_2fa(app, db, client, monkeypatch):
+    """Admin login (email+password) inatuma OTP kwa email; token inatolewa baada
+    ya kuweka code sahihi (2FA)."""
+    import app.modules.auth.routes as auth_routes
+    monkeypatch.setattr(auth_routes.secrets, "randbelow", lambda n: 246810)
     admin = _admin_doc(email_verified=True)
     await db.users.insert_one(admin)
     r = await client.post("/auth/admin/login", json={
         "email": "admin@kubadilishana.go.tz", "password": "admin1234",
     })
     assert r.status_code == 200, r.text
-    assert r.json()["access_token"]
+    body = r.json()
+    assert body.get("two_factor_required") is True
+    assert "access_token" not in body
+    # Code mbaya → 400
+    bad = await client.post("/auth/login/2fa", json={
+        "email": "admin@kubadilishana.go.tz", "code": "000000",
+    })
+    assert bad.status_code == 400
+    # Code sahihi → token
+    ok = await client.post("/auth/login/2fa", json={
+        "email": "admin@kubadilishana.go.tz", "code": "246810",
+    })
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["access_token"]
 
 
 async def test_admin_email_login_blocked_until_verified(app, db, client):
