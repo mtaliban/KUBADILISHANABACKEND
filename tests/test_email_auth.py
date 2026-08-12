@@ -268,6 +268,91 @@ async def test_email_cannot_be_taken_by_another_account(app, db, client):
     assert fresh_b.get("email") is None
 
 
+# ─── Admin cleanup: wipe_all (futa data zote za uwongo, admini wanabaki) ──
+
+async def test_cleanup_wipe_all_deletes_non_admins_keeps_admins(app, db, client):
+    """wipe_all=true: futa WATUMIAJI WOTE wasio-admin (+ matches/messages/
+    notifications/page_views) — ADMINI WANABAKIA. Hii ndiyo inaondoa data
+    zote za uwongo kabla ya kuanza rasmi."""
+    admin = _admin_doc(email_verified=True)
+    await db.users.insert_one(admin)
+    now = datetime.now(timezone.utc)
+    def _user_doc(phone):
+        return {
+            "_id": ObjectId(), "full_name": f"Fake {phone}", "phone_primary": phone,
+            "password_hash": hash_password("secret123"), "category": "health",
+            "cadre_code": "CO", "cadre_display": "Clinical Officer", "subjects": [],
+            "current_station": {"region_id": 17, "region_name": "Mwanza", "district_id": 1701,
+                                "district_name": "Nyamagana Dc", "facility_id": None, "facility_name": None},
+            "desired_destinations": [], "status": "active", "is_verified": False,
+            "is_admin": False, "created_at": now, "updated_at": now,
+        }
+    u1 = _user_doc("+255711000001")
+    u2 = _user_doc("+255711000002")
+    await db.users.insert_many([u1, u2])
+    await db.matches.insert_one({"user_a_id": str(u1["_id"]), "user_b_id": str(u2["_id"]), "score": 0.8, "matched_at": now})
+    await db.messages.insert_one({"from_user_id": str(u1["_id"]), "to_user_id": str(u2["_id"]), "text": "hi", "created_at": now})
+    await db.notifications.insert_one({"user_id": str(u2["_id"]), "title": "t", "body": "b", "read": False, "created_at": now})
+    await db.page_views.insert_one({"user_id": str(u1["_id"]), "path": "/dashboard", "visited_at": now})
+
+    token = create_access_token(str(admin["_id"]))
+    res = await client.post("/admin/cleanup-test-data?wipe_all=true", headers=_auth(token))
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["mode"] == "wipe_all"
+    assert body["deleted_users"] == 2
+    # Admini wanabaki; data zote za wasio-admin zimefutwa
+    assert await db.users.count_documents({}) == 1
+    assert await db.users.count_documents({"is_admin": True}) == 1
+    assert await db.matches.count_documents({}) == 0
+    assert await db.messages.count_documents({}) == 0
+    assert await db.notifications.count_documents({}) == 0
+    assert await db.page_views.count_documents({}) == 0
+
+
+async def test_cleanup_wipe_all_requires_admin(app, db, client):
+    """Wipe_all ni ya ADMIN pekee — mtu wa kawaida hana ruhusa."""
+    now = datetime.now(timezone.utc)
+    await db.users.insert_one({
+        "_id": ObjectId(), "full_name": "Mtu", "phone_primary": "+255712345678",
+        "password_hash": hash_password("secret123"), "category": "health",
+        "cadre_code": "CO", "cadre_display": "Clinical Officer", "subjects": [],
+        "current_station": {}, "desired_destinations": [], "status": "active",
+        "is_admin": False, "created_at": now, "updated_at": now,
+    })
+    tok = create_access_token(str((await db.users.find_one({"phone_primary": "+255712345678"}))["_id"]))
+    res = await client.post("/admin/cleanup-test-data?wipe_all=true", headers=_auth(tok))
+    assert res.status_code == 403
+
+
+async def test_cleanup_pattern_only_without_wipe_all(app, db, client):
+    """Bila wipe_all → patterns za test tu zinafutwa; mtu wa kawaida anabaki."""
+    admin = _admin_doc(email_verified=True)
+    await db.users.insert_one(admin)
+    now = datetime.now(timezone.utc)
+    fake = {
+        "_id": ObjectId(), "full_name": "Test Debug", "phone_primary": "+255700000001",
+        "password_hash": hash_password("secret123"), "category": "health",
+        "cadre_code": "CO", "cadre_display": "Clinical Officer", "subjects": [],
+        "current_station": {}, "desired_destinations": [], "status": "active",
+        "is_admin": False, "created_at": now, "updated_at": now,
+    }
+    real = {
+        "_id": ObjectId(), "full_name": "Juma Bakari", "phone_primary": "+255713456789",
+        "password_hash": hash_password("secret123"), "category": "health",
+        "cadre_code": "CO", "cadre_display": "Clinical Officer", "subjects": [],
+        "current_station": {}, "desired_destinations": [], "status": "active",
+        "is_admin": False, "created_at": now, "updated_at": now,
+    }
+    await db.users.insert_many([fake, real])
+    token = create_access_token(str(admin["_id"]))
+    res = await client.post("/admin/cleanup-test-data", headers=_auth(token))
+    assert res.status_code == 200, res.text
+    assert res.json()["deleted_users"] == 1
+    assert await db.users.count_documents({"full_name": "Juma Bakari"}) == 1
+    assert await db.users.count_documents({"full_name": "Test Debug"}) == 0
+
+
 # ─── Normalization ──────────────────────────────────────────────────
 
 async def test_normalize_email_lowercases_and_trims():

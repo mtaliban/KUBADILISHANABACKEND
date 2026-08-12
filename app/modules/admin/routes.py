@@ -701,14 +701,47 @@ async def events_clear(_=Depends(current_admin)):
 
 
 @router.post("/cleanup-test-data")
-async def cleanup_test_data(_=Depends(current_admin), max_delete: int = Query(500, le=2000)):
+async def cleanup_test_data(_=Depends(current_admin), max_delete: int = Query(500, le=2000),
+                           wipe_all: bool = Query(False, description="true = futa WATUMIAJI WOTE wasio-admin (data zote za uwongo) — admini huhifadhiwa")):
     """Futa akaunti za MAJARIBIO (data ya uwongo): majina yanayofanana na
     patterns za test/demo/import (#), namba za test, pamoja na event_log na
     page_views zao. ADMINI HAWAGUSIWI kamwe.
 
-    Huu ni msaada wa haraka kwa admin — siyo script ya kawaida; kila akaunti
-    inakaguliwa dhidi ya patterns kabla ya kufutwa."""
+    `wipe_all=true` → futa WATUMIAJI WOTE wasio-admin (na data zao zote:
+    matches, messages, notifications, page_views, event_log). Admini tu
+    hubakia. Hii ndiyo inaondoa "data za uwongo" kabisa kama mfumo umejaa
+    seed/test data."""
     db = get_db()
+    if wipe_all:
+        # Futa kila mtu ambaye SI admin (pamoja na data zake zote) — kwa BATCHES
+        # (usifute waliobaki: endapo watumiaji ni zaidi ya max_delete).
+        from bson import ObjectId as _OID
+        batch = max_delete
+        total_users = total_events = total_views = 0
+        while True:
+            cur = db.users.find({"is_admin": {"$ne": True}}, {"_id": 1}).limit(batch)
+            ids = [str(u["_id"]) async for u in cur]
+            if not ids:
+                break
+            oids = [_OID(i) for i in ids]
+            total_users += (await db.users.delete_many({"_id": {"$in": oids}})).deleted_count
+            total_events += (await db.event_log.delete_many({"actor_user_id": {"$in": ids}})).deleted_count
+            total_views += (await db.page_views.delete_many({"user_id": {"$in": ids}})).deleted_count
+            await db.matches.delete_many({"$or": [{"user_a_id": {"$in": ids}}, {"user_b_id": {"$in": ids}}]})
+            await db.notifications.delete_many({"user_id": {"$in": ids}})
+            await db.messages.delete_many({"$or": [{"from_user_id": {"$in": ids}}, {"to_user_id": {"$in": ids}}]})
+            await db.call_logs.delete_many({"$or": [{"from_user_id": {"$in": ids}}, {"to_user_id": {"$in": ids}}]})
+            # Orphan auth records (OTP / resets / verifications) za waliofutwa
+            await db.login_otps.delete_many({"user_id": {"$in": oids}})
+            await db.password_resets.delete_many({"user_id": {"$in": oids}})
+            await db.email_verifications.delete_many({"user_id": {"$in": oids}})
+            if len(ids) < batch:
+                break
+        await _bust_admin_caches()
+        return {"ok": True, "mode": "wipe_all",
+                "deleted_users": total_users,
+                "deleted_events": total_events, "deleted_views": total_views}
+
     # MAKINI: ni patterns za majaribio ZILIZOJULIKANA tu (jina linaloanza na
     # kitu hiki au lenye neno kamili) — usifute mtu halisi kwa kosa. `\b` pande
     # zote mbili: "Protest" HAIENDANI (test si neno kamili), "Test Debug" ndiyo.

@@ -52,9 +52,12 @@ async def _create_and_send_otp(user: dict, purpose: str) -> bool:
         }}, upsert=True,
     )
     heading = "Code yako ya uthibitisho" if purpose == "2fa" else "Thibitisha Email yako"
-    body = ("Unaingia kwenye akaunti yako ya ADMIN. Weka code hii hapa chini kwenye mfumo ili ukamilishe kuingia (2FA)."
-            if purpose == "2fa" else
-            "Umeomba kuthibitisha barua pepe yako ya admin. Weka code hii hapa chini kwenye mfumo ili uthibitishe.")
+    if purpose == "2fa":
+        # EMAIL SAFI: code pekee + maelekezo mafupi. Hakuna maneno ya "2FA"
+        # au "ADMIN" — utumiaji usichanganyike. (Mtu anajua kwanini anapata hii.)
+        body = "Weka code hii hapa chini kwenye mfumo ili ukamilishe kuingia."
+    else:
+        body = "Umeomba kuthibitisha barua pepe yako. Weka code hii hapa chini kwenye mfumo ili uthibitishe."
     cfg = await get_email_config()
     return await send_email(cfg, user["email"], f"{heading} — Kubadilishana Vituo", heading, body, code)
 
@@ -324,7 +327,7 @@ async def request_email_verification(body: EmailVerifyRequest):
     cfg = await get_email_config()
     await send_email(cfg, email, "Thibitisha Email yako — Kubadilishana Vituo",
                      "Thibitisha Email yako",
-                     f"Habari {user['full_name']}, weka code hii kwenye mfumo kuthibitisha barua pepe yako ya admin.",
+                     "Weka code hii kwenye mfumo kuthibitisha barua pepe yako.",
                      code)
     publish(TOPIC_EMAIL_VERIFICATION_REQUESTED, {
         "event": "email.verification_requested", "user_id": str(user["_id"]),

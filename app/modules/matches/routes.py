@@ -47,6 +47,14 @@ def _subjects_overlap(a: list, b: list) -> bool:
     return True
 
 
+def _subjects_match_strict(my: list, theirs: list) -> bool:
+    """STRICT subject match (kichujio kimewashwa): wote wawili WANA masomo na
+    wanashiriki angalau somo moja. Mtu asiye na masomo kabisa HAONEKANI
+    (vinginevyo kichujio "Masomo yanayofanana" hakifanyi kazi kwa kila mtu)."""
+    aa, bb = set(my or []), set(theirs or [])
+    return bool(aa and bb and (aa & bb))
+
+
 @router.get("/me")
 async def my_matches(user=Depends(current_user),
                      region_id: Optional[int] = None, district_id: Optional[int] = None,
@@ -164,8 +172,14 @@ async def board(
     # kuwaona wote wa idara yake hata kama masomo hayakufanana. Akipenda,
     # anaweza kuweka toggle `subject_match=true` ili waonekane tu wenye masomo
     # yanayolingana (k.m. MATH+KISWAHILI aone wenye MATH au KISWAHILI).
-    if subject_match and my_category == "education" and user.get("subjects"):
-        raw = [u for u in raw if _subjects_overlap(user["subjects"], u.get("subjects") or [])]
+    # STRICT: mtu asiye na masomo kabisa haonekani (kichujio kinachuja kweli).
+    if subject_match and my_category == "education":
+        my_subjects = user.get("subjects") or []
+        if not my_subjects:
+            # Hakuna masomo ya kuchuja nayo — kichujio hakifanyi kazi (wote).
+            pass
+        else:
+            raw = [u for u in raw if _subjects_match_strict(my_subjects, u.get("subjects") or [])]
 
     if scope == "incoming":
         # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako.

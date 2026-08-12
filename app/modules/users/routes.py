@@ -4,7 +4,7 @@ from bson import ObjectId
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
 from ...db import get_db
-from ...security import current_user
+from ...security import current_user, verify_password, hash_password, normalize_phone
 from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_USER_PROFILE_UPDATED, TOPIC_USER_STATION_CHANGED, TOPIC_USER_DESTINATION_CHANGED,
@@ -19,7 +19,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = Field(None, min_length=3, max_length=100)
     phone_alt: Optional[str] = None
+    phone_primary: Optional[str] = None
     subjects: Optional[list[str]] = None
+    current_station: Optional[StationInput] = None
+    desired_destinations: Optional[list[DestinationInput]] = None
 
 
 class UpdateStationRequest(BaseModel):
@@ -33,6 +36,11 @@ class UpdateDestinationsRequest(BaseModel):
 class NotificationPrefs(BaseModel):
     new_matches: bool = True
     messages: bool = True
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=6, max_length=128)
 
 
 class FollowedRegionsRequest(BaseModel):
@@ -69,22 +77,59 @@ async def get_me(user=Depends(current_user)):
 
 @router.patch("/me")
 async def update_me(body: UpdateProfileRequest, user=Depends(current_user)):
+    """Update KAMILI ya wasifu: jina, simu, masomo, kituo, destinations —
+    yote kwenye hatua moja (profile edit ya mtumiaji). Hakuna cache ya kale."""
+    db = get_db()
     updates = {}
     if body.full_name is not None:
         updates["full_name"] = body.full_name.strip()
     if body.phone_alt is not None:
         updates["phone_alt"] = body.phone_alt
+    if body.phone_primary is not None:
+        try:
+            phone = normalize_phone(body.phone_primary)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        # Ipo kwa mtu mwingine? (usiweze kuiba namba ya mtu)
+        other = await db.users.find_one({
+            "$or": [{"phone_primary": phone}, {"phone_alt": phone}],
+            "_id": {"$ne": user["_id"]},
+        }, {"_id": 1})
+        if other:
+            raise HTTPException(409, "Namba hii inatumiwa na akaunti nyingine")
+        updates["phone_primary"] = phone
     if body.subjects is not None:
         updates["subjects"] = list(dict.fromkeys(body.subjects))
+    if body.current_station is not None:
+        updates["current_station"] = body.current_station.model_dump()
+    if body.desired_destinations is not None:
+        updates["desired_destinations"] = [d.model_dump() for d in body.desired_destinations]
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc)
-        await get_db().users.update_one({"_id": user["_id"]}, {"$set": updates})
+        await db.users.update_one({"_id": user["_id"]}, {"$set": updates})
         publish(TOPIC_USER_PROFILE_UPDATED, {
             "event": "user.profile_updated", "user_id": str(user["_id"]),
             "changed_fields": list(updates.keys()), "occurred_at": updates["updated_at"].isoformat(),
         })
-    fresh = await get_db().users.find_one({"_id": user["_id"]})
+    fresh = await db.users.find_one({"_id": user["_id"]})
     return _to_response(fresh)
+
+
+@router.post("/me/password")
+async def change_my_password(body: ChangePasswordRequest, user=Depends(current_user)):
+    """Badilisha password ya mtumiaji mwenyewe (anahitaji password ya sasa)."""
+    if not verify_password(body.current_password, user["password_hash"]):
+        raise HTTPException(400, "Password ya sasa si sahihi")
+    now = datetime.now(timezone.utc)
+    await get_db().users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": hash_password(body.new_password), "updated_at": now}},
+    )
+    publish(TOPIC_USER_PROFILE_UPDATED, {
+        "event": "user.profile_updated", "user_id": str(user["_id"]),
+        "changed_fields": ["password_hash"], "occurred_at": now.isoformat(),
+    })
+    return {"ok": True, "message": "Password imebadilishwa ✓"}
 
 
 @router.put("/me/station")

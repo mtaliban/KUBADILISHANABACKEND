@@ -251,13 +251,14 @@ async def test_board_subject_match_education(app, db, client):
     assert str(no_subjects["_id"]) in ids
     assert str(diff_science["_id"]) in ids  # masomo tofauti BADO anaonekana (idara yake)
 
-    # subject_match=true: diff_science aondoke, waliofanana wabaki
+    # subject_match=true: STRICT — waliofanana wabaki; wenye masomo tofauti
+    # NA wasio na masomo wote waondoke (kichujio lazima kichuje kweli!)
     res2 = await client.get("/matches/board?scope=incoming&subject_match=true", headers=_auth(token))
     body2 = res2.json()
     ids2 = {c["user_id"] for c in body2["candidates"]}
     assert str(same_math["_id"]) in ids2
     assert str(same_sw["_id"]) in ids2
-    assert str(no_subjects["_id"]) in ids2
+    assert str(no_subjects["_id"]) not in ids2  # hakuna masomo → hawezi kuwa "somo linalofanana"
     assert str(diff_science["_id"]) not in ids2  # subject_match=ON → masomo tofauti HAYUPO
     # candidates wanarudisha subjects (kwa frontend kuonyesha/highlight)
     math_card = next(c for c in body2["candidates"] if c["user_id"] == str(same_math["_id"]))
