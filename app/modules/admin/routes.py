@@ -2,11 +2,13 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import os
 import re
-import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Optional, Literal
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,10 +19,11 @@ from ...db import get_db
 from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED, TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
+    TOPIC_DATA_SUBJECTS_CHANGED, TOPIC_DATA_CADRES_CHANGED,
+    TOPIC_DATA_REGIONS_CHANGED, TOPIC_DATA_DISTRICTS_CHANGED,
 )
 from ...security import current_admin, current_user, _is_valid_object_id, hash_password
 from ...cache import get_redis
-from ...emailer import get_email_config, send_email
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -280,6 +283,63 @@ async def admin_delete_user(user_id: str, _=Depends(current_admin)):
     return {"ok": True, "deleted_user_id": user_id}
 
 
+class BulkUsersRequest(BaseModel):
+    """Bulk actions kwenye Watumiaji: delete / disable / enable kwa watu wengi
+    kwa pamoja (select-all + kituo cha kuchagua wengi)."""
+    user_ids: list[str] = Field(..., min_length=1, max_length=500)
+    action: Literal["delete", "disable", "enable"]
+
+
+@router.post("/users/bulk")
+async def admin_bulk_users(body: BulkUsersRequest, admin=Depends(current_admin)):
+    """Futa / funga / fungua watumiaji WENGI mara moja. ADMINI HAZIGUSIWI
+    (na mtumiaji anayefanya operesheni hajifanyi mwenyewe) — usalama!"""
+    db = get_db()
+    ids: list[str] = []
+    for uid in body.user_ids:
+        if _is_valid_object_id(uid):
+            ids.append(uid)
+    if not ids:
+        raise HTTPException(400, "Hakuna user_ids sahihi")
+    oids = [ObjectId(u) for u in ids]
+    # Usiguse admins wala mtendaji mwenyewe — weka kando na waonyeshe.
+    targets = [u async for u in db.users.find({"_id": {"$in": oids},
+                                               "is_admin": {"$ne": True},
+                                               "_id": {"$ne": admin["_id"]}})]
+    skipped = len(ids) - len(targets)
+    processed = 0
+    now = datetime.now(timezone.utc)
+    for u in targets:
+        uid = str(u["_id"])
+        if body.action == "delete":
+            await db.users.delete_one({"_id": u["_id"]})
+            await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+            await db.messages.delete_many({"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
+            await db.notifications.delete_many({"user_id": uid})
+            await db.call_logs.delete_many({"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
+            await db.page_views.delete_many({"user_id": uid})
+            await db.event_log.delete_many({"actor_user_id": uid})
+            await db.login_otps.delete_many({"user_id": u["_id"]})
+            await db.password_resets.delete_many({"user_id": u["_id"]})
+            await db.email_verifications.delete_many({"user_id": u["_id"]})
+            publish(TOPIC_USER_DELETED, {
+                "event": "user.deleted", "user_id": uid,
+                "occurred_at": now.isoformat(),
+            })
+        else:
+            status = "active" if body.action == "enable" else "disabled"
+            await db.users.update_one({"_id": u["_id"]}, {"$set": {"status": status, "updated_at": now}})
+            publish(TOPIC_USER_UPDATED_BY_ADMIN, {
+                "event": "user.updated_by_admin", "user_id": uid,
+                "changed_fields": ["status"], "status": status,
+                "occurred_at": now.isoformat(),
+            })
+        processed += 1
+    await _bust_admin_caches()
+    return {"ok": True, "action": body.action, "processed": processed,
+            "skipped_admin": skipped, "total_requested": len(ids)}
+
+
 @router.post("/users/{user_id}/grant-admin")
 async def grant_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": True}})
@@ -428,6 +488,19 @@ async def _bust_location_caches() -> None:
         pass
 
 
+async def _publish_data_event(topic: str, event_type: str, kind: str, action: str, item: dict, actor: dict) -> None:
+    """Log kila CRUD ya reference data kwenye event stream — admin pages zote
+    (Events, Ripoti) zinajaa papo hapo bila ku-refresh (event-driven)."""
+    try:
+        publish(topic, {
+            "event": event_type, "kind": kind, "action": action,
+            "item": item, "by_user_id": str(actor["_id"]), "by_name": actor.get("full_name"),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.exception(f"data event publish failed: {e}")
+
+
 class SubjectIn(BaseModel):
     code: str = Field(..., min_length=2, max_length=30)
     name: str = Field(..., min_length=2, max_length=120)
@@ -443,14 +516,23 @@ class CadreIn(BaseModel):
 
 
 class RegionIn(BaseModel):
-    id: int
+    # id ni HIARI — ikiwa haijawekwa (None/0), backend inajiongezea yenyewe
+    # (max+1). Hivyo admin hahitaji kujua/kuandika ID kwa mkono.
+    id: int | None = None
     name: str = Field(..., min_length=2, max_length=80)
 
 
 class DistrictIn(BaseModel):
-    id: int
+    # id ni HIARI — inajiongezea yenyewe (max+1) kama haijawekwa.
+    id: int | None = None
     region_id: int
     name: str = Field(..., min_length=2, max_length=80)
+
+
+async def _next_id(db, collection: str) -> int:
+    """ID inayofuata: max+1 ya iliyopo — hakuna haja ya admin kuiandika."""
+    doc = await db[collection].find_one({}, {"id": 1}, sort=[("id", -1)])
+    return (doc["id"] if doc and doc.get("id") is not None else 0) + 1
 
 
 @router.get("/data/subjects")
@@ -460,30 +542,34 @@ async def data_subjects(_=Depends(current_admin), level: Optional[str] = None):
 
 
 @router.post("/data/subjects")
-async def data_subjects_add(body: SubjectIn, _=Depends(current_admin)):
+async def data_subjects_add(body: SubjectIn, admin=Depends(current_admin)):
     db = get_db()
     if await db.subjects.find_one({"code": body.code}):
         raise HTTPException(409, f"Somo '{body.code}' tayari lipo")
-    await db.subjects.insert_one(body.model_dump())
+    data = body.model_dump()
+    await db.subjects.insert_one(dict(data))  # copy — insert inaongeza _id kwenye dict
     await _bust_location_caches()
-    return {"ok": True, "subject": body.model_dump()}
+    await _publish_data_event(TOPIC_DATA_SUBJECTS_CHANGED, "data.subject_added", "subject", "added", data, admin)
+    return {"ok": True, "subject": data}
 
 
 @router.patch("/data/subjects/{code}")
-async def data_subjects_update(code: str, body: SubjectIn, _=Depends(current_admin)):
+async def data_subjects_update(code: str, body: SubjectIn, admin=Depends(current_admin)):
     r = await get_db().subjects.update_one({"code": code}, {"$set": body.model_dump()})
     if not r.matched_count:
         raise HTTPException(404, "Somo halipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_SUBJECTS_CHANGED, "data.subject_updated", "subject", "updated", body.model_dump(), admin)
     return {"ok": True}
 
 
 @router.delete("/data/subjects/{code}")
-async def data_subjects_delete(code: str, _=Depends(current_admin)):
+async def data_subjects_delete(code: str, admin=Depends(current_admin)):
     r = await get_db().subjects.delete_one({"code": code})
     if not r.deleted_count:
         raise HTTPException(404, "Somo halipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_SUBJECTS_CHANGED, "data.subject_deleted", "subject", "deleted", {"code": code}, admin)
     return {"ok": True, "deleted": code}
 
 
@@ -494,30 +580,34 @@ async def data_cadres(_=Depends(current_admin), category: Optional[Literal["heal
 
 
 @router.post("/data/cadres")
-async def data_cadres_add(body: CadreIn, _=Depends(current_admin)):
+async def data_cadres_add(body: CadreIn, admin=Depends(current_admin)):
     db = get_db()
     if await db.cadres.find_one({"code": body.code}):
         raise HTTPException(409, f"Kada '{body.code}' tayari ipo")
-    await db.cadres.insert_one(body.model_dump())
+    data = body.model_dump()
+    await db.cadres.insert_one(dict(data))  # copy — insert inaongeza _id kwenye dict
     await _bust_location_caches()
-    return {"ok": True, "cadre": body.model_dump()}
+    await _publish_data_event(TOPIC_DATA_CADRES_CHANGED, "data.cadre_added", "cadre", "added", data, admin)
+    return {"ok": True, "cadre": data}
 
 
 @router.patch("/data/cadres/{code}")
-async def data_cadres_update(code: str, body: CadreIn, _=Depends(current_admin)):
+async def data_cadres_update(code: str, body: CadreIn, admin=Depends(current_admin)):
     r = await get_db().cadres.update_one({"code": code}, {"$set": body.model_dump()})
     if not r.matched_count:
         raise HTTPException(404, "Kada haipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_CADRES_CHANGED, "data.cadre_updated", "cadre", "updated", body.model_dump(), admin)
     return {"ok": True}
 
 
 @router.delete("/data/cadres/{code}")
-async def data_cadres_delete(code: str, _=Depends(current_admin)):
+async def data_cadres_delete(code: str, admin=Depends(current_admin)):
     r = await get_db().cadres.delete_one({"code": code})
     if not r.deleted_count:
         raise HTTPException(404, "Kada haipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_CADRES_CHANGED, "data.cadre_deleted", "cadre", "deleted", {"code": code}, admin)
     return {"ok": True, "deleted": code}
 
 
@@ -527,30 +617,36 @@ async def data_regions(_=Depends(current_admin)):
 
 
 @router.post("/data/regions")
-async def data_regions_add(body: RegionIn, _=Depends(current_admin)):
+async def data_regions_add(body: RegionIn, admin=Depends(current_admin)):
     db = get_db()
-    if await db.regions.find_one({"id": body.id}):
+    data = body.model_dump()
+    if not data.get("id"):
+        data["id"] = await _next_id(db, "regions")  # ID inajiongezea yenyewe
+    if await db.regions.find_one({"id": data["id"]}):
         raise HTTPException(409, "Mkoa upo tayari (id inatumiwa)")
-    await db.regions.insert_one(body.model_dump())
+    await db.regions.insert_one(dict(data))  # copy — insert inaongeza _id kwenye dict
     await _bust_location_caches()
-    return {"ok": True, "region": body.model_dump()}
+    await _publish_data_event(TOPIC_DATA_REGIONS_CHANGED, "data.region_added", "region", "added", data, admin)
+    return {"ok": True, "region": data}
 
 
 @router.patch("/data/regions/{region_id}")
-async def data_regions_update(region_id: int, body: RegionIn, _=Depends(current_admin)):
+async def data_regions_update(region_id: int, body: RegionIn, admin=Depends(current_admin)):
     r = await get_db().regions.update_one({"id": region_id}, {"$set": body.model_dump()})
     if not r.matched_count:
         raise HTTPException(404, "Mkoa haupo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_REGIONS_CHANGED, "data.region_updated", "region", "updated", body.model_dump(), admin)
     return {"ok": True}
 
 
 @router.delete("/data/regions/{region_id}")
-async def data_regions_delete(region_id: int, _=Depends(current_admin)):
+async def data_regions_delete(region_id: int, admin=Depends(current_admin)):
     r = await get_db().regions.delete_one({"id": region_id})
     if not r.deleted_count:
         raise HTTPException(404, "Mkoa haupo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_REGIONS_CHANGED, "data.region_deleted", "region", "deleted", {"id": region_id}, admin)
     return {"ok": True, "deleted": region_id}
 
 
@@ -561,30 +657,36 @@ async def data_districts(_=Depends(current_admin), region_id: Optional[int] = No
 
 
 @router.post("/data/districts")
-async def data_districts_add(body: DistrictIn, _=Depends(current_admin)):
+async def data_districts_add(body: DistrictIn, admin=Depends(current_admin)):
     db = get_db()
-    if await db.districts.find_one({"id": body.id}):
+    data = body.model_dump()
+    if not data.get("id"):
+        data["id"] = await _next_id(db, "districts")  # ID inajiongezea yenyewe
+    if await db.districts.find_one({"id": data["id"]}):
         raise HTTPException(409, "Wilaya ipo tayari (id inatumiwa)")
-    await db.districts.insert_one(body.model_dump())
+    await db.districts.insert_one(dict(data))  # copy — insert inaongeza _id kwenye dict
     await _bust_location_caches()
-    return {"ok": True, "district": body.model_dump()}
+    await _publish_data_event(TOPIC_DATA_DISTRICTS_CHANGED, "data.district_added", "district", "added", data, admin)
+    return {"ok": True, "district": data}
 
 
 @router.patch("/data/districts/{district_id}")
-async def data_districts_update(district_id: int, body: DistrictIn, _=Depends(current_admin)):
+async def data_districts_update(district_id: int, body: DistrictIn, admin=Depends(current_admin)):
     r = await get_db().districts.update_one({"id": district_id}, {"$set": body.model_dump()})
     if not r.matched_count:
         raise HTTPException(404, "Wilaya haipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_DISTRICTS_CHANGED, "data.district_updated", "district", "updated", body.model_dump(), admin)
     return {"ok": True}
 
 
 @router.delete("/data/districts/{district_id}")
-async def data_districts_delete(district_id: int, _=Depends(current_admin)):
+async def data_districts_delete(district_id: int, admin=Depends(current_admin)):
     r = await get_db().districts.delete_one({"id": district_id})
     if not r.deleted_count:
         raise HTTPException(404, "Wilaya haipo")
     await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_DISTRICTS_CHANGED, "data.district_deleted", "district", "deleted", {"id": district_id}, admin)
     return {"ok": True, "deleted": district_id}
 
 
@@ -768,78 +870,6 @@ async def cleanup_test_data(_=Depends(current_admin), max_delete: int = Query(50
     await _bust_admin_caches()
     return {"ok": True, "deleted_users": del_users.deleted_count,
             "deleted_events": del_events.deleted_count, "deleted_views": del_views.deleted_count}
-
-
-# ─── Email settings (admin-configurable — hakuna SSH/git inahitajika) ──────
-# Mipangilio ya SMTP/MailerSend inahifadhiwa kwenye MongoDB (settings collection)
-# na kusomwa na emailer.get_email_config(). Admin anaweza kuweka Gmail App
-# Password yake kwenye /admin/settings na kuthibitisha kwa "Tuma Code ya Majaribio".
-
-
-class EmailSettingsIn(BaseModel):
-    smtp_host: str = ""
-    smtp_port: int = Field(587, ge=1, le=65535)
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""
-    smtp_use_tls: bool = True
-    mailersend_api_key: str = ""
-    mailersend_from: str = ""
-    enabled: bool = True
-
-
-@router.get("/settings/email")
-async def get_email_settings(_=Depends(current_admin)):
-    doc = await get_db().settings.find_one({"key": "email"})
-    base = {
-        "configured": bool(doc and (doc.get("smtp_host") or doc.get("mailersend_api_key"))),
-        "smtp_host": (doc or {}).get("smtp_host", ""),
-        "smtp_port": (doc or {}).get("smtp_port", 587),
-        "smtp_username": (doc or {}).get("smtp_username", ""),
-        "smtp_password": "********" if (doc or {}).get("smtp_password") else "",
-        "smtp_from": (doc or {}).get("smtp_from", settings.smtp_from),
-        "smtp_use_tls": bool((doc or {}).get("smtp_use_tls", True)),
-        "mailersend_api_key": "********" if (doc or {}).get("mailersend_api_key") else "",
-        "mailersend_from": (doc or {}).get("mailersend_from", settings.mailersend_from),
-        "enabled": bool((doc or {}).get("enabled", True)),
-    }
-    return base
-
-
-@router.post("/settings/email")
-async def save_email_settings(body: EmailSettingsIn, _=Depends(current_admin)):
-    db = get_db()
-    existing = await db.settings.find_one({"key": "email"}) or {}
-    data = body.model_dump()
-    # "********" = admin hakuandika upya — weka ile ya zamani (usifute kwa kosa).
-    if data.get("smtp_password") == "********":
-        data["smtp_password"] = existing.get("smtp_password", "")
-    if data.get("mailersend_api_key") == "********":
-        data["mailersend_api_key"] = existing.get("mailersend_api_key", "")
-    data["updated_at"] = datetime.now(timezone.utc)
-    await db.settings.update_one({"key": "email"}, {"$set": data}, upsert=True)
-    await _bust_admin_caches()
-    configured = bool(data.get("smtp_host") or data.get("mailersend_api_key"))
-    return {"ok": True, "configured": configured,
-            "message": "Mipangilio ya email imehifadhiwa ✓"}
-
-
-@router.post("/settings/email/test")
-async def test_email_settings(admin=Depends(current_admin)):
-    """Tuma code ya majaribio kwa email ya admin mwenyewe — uthibitisho wa
-    mipangilio end-to-end (kwa njia ya UI, hakuna SSH)."""
-    admin_email = admin.get("email")
-    if not admin_email:
-        raise HTTPException(400, "Akaunti hii haina email — wasiliana na admin mwenzako.")
-    cfg = await get_email_config()
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    ok = await send_email(cfg, admin_email, "Code ya Majaribio — Kubadilishana Vituo",
-                          "Ujumbe wa Majaribio ✅",
-                          f"Habari {admin.get('full_name')}, email iko sawa! Weka code hii kuthibitisha: {code}.",
-                          code)
-    if not ok:
-        raise HTTPException(400, "Email haikutumwa — kagua mipangilio (SMTP host, port, password). Code iko kwenye backend logs.")
-    return {"ok": True, "message": f"Email ya majaribio imetumwa kwa {admin_email} — angalia Inbox na Spam."}
 
 
 class PageViewIn(BaseModel):

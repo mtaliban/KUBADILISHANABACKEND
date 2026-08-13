@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = "change-me-in-production"
     jwt_alg: str = "HS256"
-    jwt_expire_hours: int = 168
+    jwt_expire_hours: int = 24
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

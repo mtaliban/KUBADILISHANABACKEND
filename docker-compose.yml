@@ -65,7 +65,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_ALG: HS256
-      JWT_EXPIRE_HOURS: 168
+      JWT_EXPIRE_HOURS: 24
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       # EMAIL (SMTP/MailerSend) — code za 2FA & email verification hutumwa kwa njia hii.
       # Weka kwenye .env ya server (sio git!) au Admin → Mipangilio → Mipangilio ya Email.
