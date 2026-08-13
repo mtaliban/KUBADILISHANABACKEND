@@ -265,6 +265,68 @@ async def test_board_subject_match_education(app, db, client):
     assert math_card["subjects"] == ["MATH"]
 
 
+async def test_board_subject_filter_all_any_none_and_search(app, db, client):
+    """Kichujio kipya cha masomo: all (masomo yote mawili), any (somo moja),
+    none (wasio match), subject_q (search kwa masomo maalum)."""
+    await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
+    me = _user("+255711100001", region_id=4, region_name="Dodoma", dest_region_ids=[3],
+               cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+               category="education", subjects=["MATH", "KISWAHILI"])
+    # Wote wana MATH+KISWAHILI → all match
+    both = _user("+255711100002", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                 cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                 category="education", subjects=["MATH", "KISWAHILI"])
+    # Ana MATH pekee → any match, si all
+    math_only = _user("+255711100003", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                      cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                      category="education", subjects=["MATH"])
+    # Ana SCIENCE tu → no match
+    science_only = _user("+255711100004", region_id=3, region_name="Dar Es Salaam", dest_region_ids=[4],
+                         cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
+                         category="education", subjects=["SCIENCE"])
+    for u in (me, both, math_only, science_only):
+        await db.users.insert_one(u)
+    token = create_access_token(str(me["_id"]))
+
+    def ids_of(resp):
+        return {c["user_id"] for c in resp.json()["candidates"]}
+
+    # all → wale wenye MATH NA KISWAHILI wote wawili
+    res = await client.get("/matches/board?scope=incoming&subject_filter=all", headers=_auth(token))
+    assert res.status_code == 200
+    ids = ids_of(res)
+    assert str(both["_id"]) in ids
+    assert str(math_only["_id"]) not in ids  # hana KISWAHILI
+    assert str(science_only["_id"]) not in ids
+
+    # any → wenye angalau somo moja linalofanana
+    res = await client.get("/matches/board?scope=incoming&subject_filter=any", headers=_auth(token))
+    ids = ids_of(res)
+    assert str(both["_id"]) in ids
+    assert str(math_only["_id"]) in ids
+    assert str(science_only["_id"]) not in ids
+
+    # none → wasio na somo lolote linalofanana
+    res = await client.get("/matches/board?scope=incoming&subject_filter=none", headers=_auth(token))
+    ids = ids_of(res)
+    assert str(both["_id"]) not in ids
+    assert str(math_only["_id"]) not in ids
+    assert str(science_only["_id"]) in ids
+
+    # subject_q → search kwa masomo maalum (SCIENCE)
+    res = await client.get("/matches/board?scope=incoming&subject_q=SCIENCE", headers=_auth(token))
+    ids = ids_of(res)
+    assert str(science_only["_id"]) in ids
+    assert str(both["_id"]) not in ids
+
+    # subject_q pamoja na subject_filter=all — bado inafanya kazi
+    res = await client.get("/matches/board?scope=incoming&subject_filter=all&subject_q=KISWAHILI", headers=_auth(token))
+    ids = ids_of(res)
+    assert str(both["_id"]) in ids
+    assert str(math_only["_id"]) not in ids  # hana KISWAHILI
+    assert str(science_only["_id"]) not in ids
+
+
 async def test_board_incoming_district_destination_not_blocked(app, db, client):
     """TATIZO HALISI (production): mwalimu wa Dar (Ilala) anataka kwenda Dodoma
     (Chamwino) na mwalimu wa Dodoma (Chamwino) anataka kuja Dar (Kigamboni).

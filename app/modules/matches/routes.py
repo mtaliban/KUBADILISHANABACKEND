@@ -55,6 +55,22 @@ def _subjects_match_strict(my: list, theirs: list) -> bool:
     return bool(aa and bb and (aa & bb))
 
 
+def _subjects_match_all(my: list, theirs: list) -> bool:
+    """Masomo YOTE mawili (au yote ya mimi) yanapaswa kufanana — hata somo
+    moja likikosekana, huyu haonekani. Mtu asiye na masomo haonekani."""
+    aa, bb = set(my or []), set(theirs or [])
+    return bool(aa and bb and aa.issubset(bb))
+
+
+def _subjects_no_match(my: list, theirs: list) -> bool:
+    """WASIO match: hawana somo lolote linalofanana (mmoja asiye na masomo
+    au masomo yao yakiwa tofauti kabisa)."""
+    aa, bb = set(my or []), set(theirs or [])
+    if not aa or not bb:
+        return True
+    return not (aa & bb)
+
+
 @router.get("/me")
 async def my_matches(user=Depends(current_user),
                      region_id: Optional[int] = None, district_id: Optional[int] = None,
@@ -115,7 +131,9 @@ async def board(
     region_ids: Optional[str] = Query(None, description="comma-separated source region ids (multi-region default)"),
     district_id: Optional[int] = None,
     facility_id: Optional[str] = None,
-    subject_match: bool = Query(False, description="true = waone tu walimu wenye masomo yanayofanana; false = waone idara yako wote (default)"),
+    subject_match: bool = Query(False, description="[backward-compat] true = waone tu wenye masomo yanayofanana (sawa na subject_filter=any)"),
+    subject_filter: Literal["off", "any", "all", "none"] = Query("off", description="off = wote; any = somo moja linalofanana; all = masomo yote mawili yanafanana; none = wasio na somo linalofanana"),
+    subject_q: Optional[str] = Query(None, description="comma-separated subject codes — search walimu wenye masomo haya (yoyote kati yao)"),
     limit: int = Query(200, le=1000),
 ):
     """Dashboard stats board (ad-board juu ya dashboard).
@@ -133,7 +151,7 @@ async def board(
     # Redis cache (5s) — board ni query nzito (full candidates scan); TTL fupi
     # inalinda `online` isiwe stale sana. WS events zinabust frontend cache
     # papo hapo, hivyo board inaonekana LIVE hata ikiwa Redis cache ipo.
-    cache_key = f"board:{user['_id']}:{scope}:{region_ids or ''}:{region_id or ''}:{district_id or ''}:{facility_id or ''}:{subject_match}:{limit}"
+    cache_key = f"board:{user['_id']}:{scope}:{region_ids or ''}:{region_id or ''}:{district_id or ''}:{facility_id or ''}:{subject_match}:{subject_filter}:{subject_q or ''}:{limit}"
     cached_res = await _board_cache_get(cache_key)
     if cached_res is not None:
         return cached_res
@@ -170,16 +188,25 @@ async def board(
 
     # Masomo (OPTIONAL — default HAZICHUJI): mwalimu wa Elimu Msingi aweze
     # kuwaona wote wa idara yake hata kama masomo hayakufanana. Akipenda,
-    # anaweza kuweka toggle `subject_match=true` ili waonekane tu wenye masomo
-    # yanayolingana (k.m. MATH+KISWAHILI aone wenye MATH au KISWAHILI).
+    # anaweza kuchuja: `any` = wenye angalau somo moja linalofanana,
+    # `all` = wenye masomo YOTE mawili yanayofanana, `none` = wasio na somo
+    # linalofanana kabisa, au `subject_q` = search kwa masomo maalum.
     # STRICT: mtu asiye na masomo kabisa haonekani (kichujio kinachuja kweli).
-    if subject_match and my_category == "education":
+    if my_category == "education":
         my_subjects = user.get("subjects") or []
-        if not my_subjects:
-            # Hakuna masomo ya kuchuja nayo — kichujio hakifanyi kazi (wote).
-            pass
-        else:
+        sf = subject_filter
+        if subject_match and sf == "off":
+            sf = "any"  # backward-compat
+        if sf == "any" and my_subjects:
             raw = [u for u in raw if _subjects_match_strict(my_subjects, u.get("subjects") or [])]
+        elif sf == "all" and my_subjects:
+            raw = [u for u in raw if _subjects_match_all(my_subjects, u.get("subjects") or [])]
+        elif sf == "none":
+            raw = [u for u in raw if _subjects_no_match(my_subjects, u.get("subjects") or [])]
+        if subject_q:
+            codes = [c.strip().upper() for c in subject_q.split(",") if c.strip()]
+            if codes:
+                raw = [u for u in raw if any(c in (u.get("subjects") or []) for c in codes)]
 
     if scope == "incoming":
         # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako.

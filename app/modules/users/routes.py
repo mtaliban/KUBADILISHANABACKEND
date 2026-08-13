@@ -21,6 +21,7 @@ class UpdateProfileRequest(BaseModel):
     phone_alt: Optional[str] = None
     phone_primary: Optional[str] = None
     subjects: Optional[list[str]] = None
+    cadre_code: Optional[str] = None
     current_station: Optional[StationInput] = None
     desired_destinations: Optional[list[DestinationInput]] = None
 
@@ -100,6 +101,14 @@ async def update_me(body: UpdateProfileRequest, user=Depends(current_user)):
         updates["phone_primary"] = phone
     if body.subjects is not None:
         updates["subjects"] = list(dict.fromkeys(body.subjects))
+    if body.cadre_code is not None:
+        cadre = await db.cadres.find_one({"code": body.cadre_code})
+        if not cadre:
+            raise HTTPException(422, f"Kada '{body.cadre_code}' haipo")
+        if cadre.get("category") != user.get("category"):
+            raise HTTPException(422, "Kada hii hailingani na idara yako")
+        updates["cadre_code"] = cadre["code"]
+        updates["cadre_display"] = cadre.get("display_name") or cadre.get("name") or cadre["code"]
     if body.current_station is not None:
         updates["current_station"] = body.current_station.model_dump()
     if body.desired_destinations is not None:
