@@ -31,7 +31,9 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 def _new_order_id() -> str:
-    return f"kv_{int(datetime.now(timezone.utc).timestamp())}_{secrets.token_hex(4)}"
+    """Reference kama ya M-PESA: herufi kubwa 10 (k.m. C2H8MZ3JX1) —
+    inaonekana kisomi kwa mchangiaji na admin (sio prefix ya mfumo)."""
+    return secrets.token_hex(5).upper()
 
 
 def _donation_out(doc: dict) -> dict:
