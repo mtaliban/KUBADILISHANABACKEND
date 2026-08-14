@@ -5,7 +5,7 @@
 - Any user can list active announcements aimed at them and dismiss (cancel) them.
 """
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -21,7 +21,7 @@ router = APIRouter(tags=["announcements"])
 class AnnouncementCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=120)
     message: str = Field(..., min_length=3, max_length=2000)
-    audience: Literal["all", "health", "education", "user"] = "all"
+    audience: str = "all"  # 'all' | 'user' | code ya idara (k.m. health, education, au mpya)
     target_user_id: Optional[str] = None
 
 
@@ -29,7 +29,9 @@ async def _resolve_recipients(db, body: AnnouncementCreate) -> list[str]:
     if body.audience == "all":
         cur = db.users.find({"status": "active"}, {"_id": 1})
         return [str(u["_id"]) async for u in cur]
-    if body.audience in ("health", "education"):
+    if body.audience and body.audience not in ("all", "user"):
+        # Idara yoyote (dynamic) — health, education, au idara mpya iliyoongezwa
+        # na admin. Watu wa idara hiyo tu wanapokea tangazo.
         cur = db.users.find({"category": body.audience, "status": "active"}, {"_id": 1})
         return [str(u["_id"]) async for u in cur]
     if body.target_user_id:

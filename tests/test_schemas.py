@@ -49,9 +49,11 @@ def test_register_request_rejects_short_password():
         RegisterRequest.model_validate(valid_payload(password="123"))
 
 
-def test_register_request_rejects_invalid_category():
-    with pytest.raises(ValidationError):
-        RegisterRequest.model_validate(valid_payload(category="engineer"))
+def test_register_request_accepts_custom_category():
+    # Idara ni dynamic (admin anaweza kuongeza mpya kama "police") —
+    # hivyo category yoyote yenye herufi halali inakubalika.
+    req = RegisterRequest.model_validate(valid_payload(category="police"))
+    assert req.category == "police"
 
 
 def test_register_request_requires_at_least_one_destination():

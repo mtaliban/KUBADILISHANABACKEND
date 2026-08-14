@@ -78,8 +78,19 @@ async def list_facilities_in_region(
     return [d async for d in cursor]
 
 
+@router.get("/locations/departments")
+async def list_departments():
+    """Idara zote ACTIVE (kwa usajili na dropdown) — idara zilizositishwa
+    hazionekani kwa watumiaji (suspend ya idara)."""
+    key = "locations:departments"
+    async def _load():
+        q = {"status": "active"}
+        return [d async for d in get_db().departments.find(q, {"_id": 0}).sort("name", 1)]
+    return await cached(key, _load)
+
+
 @router.get("/cadres")
-async def list_cadres(category: Optional[Literal["health", "education"]] = Query(None)):
+async def list_cadres(category: Optional[str] = Query(None)):
     key = f"cadres:{category or 'all'}"
     async def _load():
         q = {"category": category} if category else {}

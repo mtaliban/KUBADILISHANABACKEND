@@ -30,7 +30,8 @@ TOPIC_PAYMENT_REJECTED = "kv/payment/rejected"    # + "/{user_id}"
 # Admin announcements (broadcast to users)
 TOPIC_ANNOUNCEMENT = "kv/announcement"  # + "/{recipient_user_id}"
 
-# Reference data management (admin CRUD — masomo/kada/mikoa/wilaya/vituo)
+# Reference data management (admin CRUD — idara/masomo/kada/mikoa/wilaya/vituo)
+TOPIC_DATA_DEPARTMENTS_CHANGED = "kv/data/departments_changed"
 TOPIC_DATA_SUBJECTS_CHANGED = "kv/data/subjects_changed"
 TOPIC_DATA_CADRES_CHANGED = "kv/data/cadres_changed"
 TOPIC_DATA_REGIONS_CHANGED = "kv/data/regions_changed"

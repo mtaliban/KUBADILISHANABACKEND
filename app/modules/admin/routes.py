@@ -21,7 +21,7 @@ from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_USER_REGISTERED, TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED,
     TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
-    TOPIC_DATA_SUBJECTS_CHANGED, TOPIC_DATA_CADRES_CHANGED,
+    TOPIC_DATA_DEPARTMENTS_CHANGED, TOPIC_DATA_SUBJECTS_CHANGED, TOPIC_DATA_CADRES_CHANGED,
     TOPIC_DATA_REGIONS_CHANGED, TOPIC_DATA_DISTRICTS_CHANGED,
     TOPIC_DATA_FACILITIES_CHANGED,
 )
@@ -143,7 +143,7 @@ async def stats(_=Depends(current_admin)):
 
 @router.get("/users")
 async def list_users(_=Depends(current_admin),
-                     category: Optional[Literal["health", "education"]] = None,
+                     category: Optional[str] = None,
                      cadre_code: Optional[str] = None, region_id: Optional[int] = None,
                      q: Optional[str] = None, limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
     cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{q or '-'}:{limit}:{skip}"
@@ -176,7 +176,7 @@ class AdminCreateUser(BaseModel):
     password: str = Field(..., min_length=6)
     is_admin: bool = False
     status: str = Field("active", pattern="^(active|disabled|inactive)$")
-    category: Optional[Literal["health", "education"]] = None
+    category: Optional[str] = None
     cadre_code: str | None = None
     subjects: list[str] = Field(default_factory=list)
     current_station: dict | None = None
@@ -801,6 +801,7 @@ async def _bust_location_caches() -> None:
         keys += [k async for k in r.scan_iter("cadres:*")]
         keys += [k async for k in r.scan_iter("subjects:*")]
         keys += [k async for k in r.scan_iter("admin:*")]
+        keys += [k async for k in r.scan_iter("departments:*")]
         if keys:
             await r.delete(*keys)
     except Exception:
@@ -820,6 +821,16 @@ async def _publish_data_event(topic: str, event_type: str, kind: str, action: st
         logger.exception(f"data event publish failed: {e}")
 
 
+class DepartmentIn(BaseModel):
+    """Idara (department) — k.m. Afya, Elimu. Admin anaweza kuongeza mpya,
+    kubadilisha jina, kusitisha (suspend) au kufuta. Kada na watumiaji
+    wanarejea idara kwa `code` (category)."""
+    code: str = Field(..., min_length=2, max_length=30, pattern="^[a-z0-9_-]+$")
+    name: str = Field(..., min_length=2, max_length=120)
+    status: str = Field("active", pattern="^(active|disabled)$")
+    icon: str | None = Field(None, max_length=10)
+
+
 class SubjectIn(BaseModel):
     code: str = Field(..., min_length=2, max_length=30)
     name: str = Field(..., min_length=2, max_length=120)
@@ -828,7 +839,7 @@ class SubjectIn(BaseModel):
 
 class CadreIn(BaseModel):
     code: str = Field(..., min_length=2, max_length=30)
-    category: Literal["health", "education"]
+    category: str  # code ya idara (health/education au mpya)
     display_name: str = Field(..., min_length=2, max_length=120)
     requires_subjects: bool = False
     level: str | None = Field(None, pattern="^(Primary|Secondary)$")
@@ -852,6 +863,77 @@ async def _next_id(db, collection: str) -> int:
     """ID inayofuata: max+1 ya iliyopo — hakuna haja ya admin kuiandika."""
     doc = await db[collection].find_one({}, {"id": 1}, sort=[("id", -1)])
     return (doc["id"] if doc and doc.get("id") is not None else 0) + 1
+
+
+async def _ensure_default_departments(db) -> None:
+    """Hakikisha idara za msingi (Afya + Elimu) zipo — zikiwa hazipo, ingiza.
+    Hivyo tab ya Idara huwa ina data hata kwenye mfumo mpya."""
+    if await db.departments.count_documents({}):
+        return
+    defaults = [
+        {"code": "health", "name": "Afya", "status": "active", "icon": "🏥"},
+        {"code": "education", "name": "Elimu", "status": "active", "icon": "🏫"},
+    ]
+    for d in defaults:
+        if not await db.departments.find_one({"code": d["code"]}):
+            await db.departments.insert_one(dict(d))
+
+
+@router.get("/data/departments")
+async def data_departments(_=Depends(current_admin)):
+    db = get_db()
+    await _ensure_default_departments(db)
+    return [d async for d in db.departments.find({}, {"_id": 0}).sort("name", 1)]
+
+
+@router.post("/data/departments")
+async def data_departments_add(body: DepartmentIn, admin=Depends(current_admin)):
+    db = get_db()
+    code = body.code.strip().lower()
+    if await db.departments.find_one({"code": code}):
+        raise HTTPException(409, f"Idara '{body.name}' tayari ipo (code: {code})")
+    data = {"code": code, "name": body.name.strip(), "status": body.status, "icon": body.icon}
+    await db.departments.insert_one(dict(data))
+    await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_DEPARTMENTS_CHANGED, "data.department_added", "department", "added", data, admin)
+    return {"ok": True, "department": data}
+
+
+@router.patch("/data/departments/{code}")
+async def data_departments_update(code: str, body: DepartmentIn, admin=Depends(current_admin)):
+    db = get_db()
+    updates = body.model_dump()
+    updates["code"] = updates["code"].strip().lower()
+    # Ikiwa code inabadilishwa, sasisha pia kada na watumiaji wanaotumia hiyo
+    # idara (category) — vinginevyo wanabaki na code ya zamani.
+    if updates["code"] != code:
+        await db.cadres.update_many({"category": code}, {"$set": {"category": updates["code"]}})
+        await db.users.update_many({"category": code}, {"$set": {"category": updates["code"]}})
+    updates.pop("code", None)
+    r = await db.departments.update_one({"code": code}, {"$set": updates})
+    if not r.matched_count:
+        raise HTTPException(404, "Idara haipo")
+    await _bust_location_caches()
+    await _bust_admin_caches()
+    await _publish_data_event(TOPIC_DATA_DEPARTMENTS_CHANGED, "data.department_updated", "department", "updated", body.model_dump(), admin)
+    return {"ok": True}
+
+
+@router.delete("/data/departments/{code}")
+async def data_departments_delete(code: str, admin=Depends(current_admin)):
+    """Futa idara — inakatazwa kama ipo kwenye kada au watumiaji (badala yake
+    isitishe kwanza, au badge kada/watumiaji kwa idara nyingine)."""
+    db = get_db()
+    if await db.cadres.count_documents({"category": code}):
+        raise HTTPException(409, "Idara hii inatumiwa na kada — isitishe (suspend) au hamisha kada kwanza")
+    if await db.users.count_documents({"category": code}):
+        raise HTTPException(409, "Idara hii inatumiwa na watumiaji — isitishe (suspend) au hamisha watumiaji kwanza")
+    r = await db.departments.delete_one({"code": code})
+    if not r.deleted_count:
+        raise HTTPException(404, "Idara haipo")
+    await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_DEPARTMENTS_CHANGED, "data.department_deleted", "department", "deleted", {"code": code}, admin)
+    return {"ok": True, "deleted": code}
 
 
 @router.get("/data/subjects")
@@ -893,7 +975,7 @@ async def data_subjects_delete(code: str, admin=Depends(current_admin)):
 
 
 @router.get("/data/cadres")
-async def data_cadres(_=Depends(current_admin), category: Optional[Literal["health", "education"]] = None):
+async def data_cadres(_=Depends(current_admin), category: Optional[str] = None):
     q = {"category": category} if category else {}
     return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
 

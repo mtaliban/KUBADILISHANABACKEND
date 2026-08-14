@@ -27,7 +27,7 @@ class RegisterRequest(BaseModel):
     phone_primary: str
     phone_alt: Optional[str] = None
     password: str = Field(..., min_length=6, max_length=128)
-    category: Literal["health", "education"]
+    category: str  # code ya idara (health/education au nyingine)
     cadre_code: str
     subjects: list[str] = Field(default_factory=list)
     current_station: StationInput
