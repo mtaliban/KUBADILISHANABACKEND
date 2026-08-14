@@ -82,6 +82,16 @@ async def list_facilities_in_region(
 async def list_departments():
     """Idara zote ACTIVE (kwa usajili na dropdown) — idara zilizositishwa
     hazionekani kwa watumiaji (suspend ya idara)."""
+    # Hakikisha idara za msingi (Afya + Elimu) zipo hata kabla admin hajaingia.
+    db = get_db()
+    if not await db.departments.count_documents({}):
+        defaults = [
+            {"code": "health", "name": "Afya", "status": "active", "icon": "🏥"},
+            {"code": "education", "name": "Elimu", "status": "active", "icon": "🏫"},
+        ]
+        for d in defaults:
+            if not await db.departments.find_one({"code": d["code"]}):
+                await db.departments.insert_one(dict(d))
     key = "locations:departments"
     async def _load():
         q = {"status": "active"}
