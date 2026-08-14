@@ -164,7 +164,10 @@ async def test_bulk_disable_enable(app, db, client):
     assert (await db.users.find_one({"_id": u1["_id"]}))["status"] == "active"
 
 
-async def test_bulk_delete_cleans_related_data(app, db, client):
+async def test_bulk_delete_moves_to_trash_then_purge(app, db, client):
+    """Delete sasa ni SOFT DELETE → akaunti zinaenda TRASH (zinaweza kurudishwa).
+    Matches huondolewa mara moja; messages/notifications zinaHIFADHIWA hadi
+    kufutwa KABISA (purge) kwenye trash."""
     admin = await _seed_admin(db)
     u1 = _user("+255711000002"); u2 = _user("+255711000003")
     for u in (u1, u2):
@@ -179,8 +182,18 @@ async def test_bulk_delete_cleans_related_data(app, db, client):
                           json={"user_ids": [str(u1["_id"]), str(u2["_id"])], "action": "delete"}, headers=h)
     assert r.json()["processed"] == 2
     assert await db.users.count_documents({"_id": {"$in": [u1["_id"], u2["_id"]]}}) == 0
-    # Data zinazohusiana zimeondolewa
+    # Wamehamia TRASH (soft delete) — matches zinaondolewa, data nyingine inahifadhiwa
+    assert await db.trash.count_documents({}) == 2
     assert await db.matches.count_documents({}) == 0
+    assert await db.messages.count_documents({}) == 1
+    assert await db.notifications.count_documents({}) == 1
+
+    # Kufuta KABISA (purge) kutoka trash → data zote zinapotea milele
+    trash_list = await client.get("/admin/users/trash", headers=h)
+    ids = [t["_id"] for t in trash_list.json()["items"]]
+    r2 = await client.delete("/admin/users/trash", params={"ids": ids}, headers=h)
+    assert r2.json()["purged"] == 2
+    assert await db.trash.count_documents({}) == 0
     assert await db.messages.count_documents({}) == 0
     assert await db.notifications.count_documents({}) == 0
 

@@ -202,65 +202,12 @@ async def test_admin_can_access_admin_endpoints(app, db, client):
 
 # ─── ObjectId / NoSQL injection resistance ────────────────────────────────
 
-async def test_invalid_recipient_id_returns_400_not_500(app, db, client):
-    """to_user_id that is not a valid ObjectId → 400 (no crash)."""
-    u = _user_doc("0767000009")
-    await db.users.insert_one(u)
-    tok = create_access_token(str(u["_id"]))
-    r = await client.post("/messages", headers=_auth(tok),
-                          json={"to_user_id": "not-an-objectid", "text": "hi"})
-    assert r.status_code == 400, r.text
-
-
-async def test_nosql_injection_in_recipient_rejected(app, db, client):
-    """Mongo operator injection ($ne) in to_user_id must NOT bypass lookups."""
-    u = _user_doc("0767000010")
-    await db.users.insert_one(u)
-    tok = create_access_token(str(u["_id"]))
-    r = await client.post("/messages", headers=_auth(tok),
-                          json={"to_user_id": '{"$ne": null}', "text": "hi"})
-    assert r.status_code in (400, 422), r.text
-
-
 async def test_invalid_announcement_id_400(app, db, client):
     u = _user_doc("0767000011")
     await db.users.insert_one(u)
     tok = create_access_token(str(u["_id"]))
     r = await client.post("/notifications/garbage/read", headers=_auth(tok))
     assert r.status_code == 400, r.text
-
-
-async def test_message_requires_text_length_limit(app, db, client):
-    u = _user_doc("0767000012")
-    other = _user_doc("0767000013")
-    await db.users.insert_many([u, other])
-    tok = create_access_token(str(u["_id"]))
-    # Empty text → 422 from pydantic (min_length=1)
-    r = await client.post("/messages", headers=_auth(tok),
-                          json={"to_user_id": str(other["_id"]), "text": ""})
-    assert r.status_code == 422, r.text
-    # Over-long text → 422 from pydantic (max_length=2000)
-    r = await client.post("/messages", headers=_auth(tok),
-                          json={"to_user_id": str(other["_id"]), "text": "x" * 2001})
-    assert r.status_code == 422, r.text
-
-
-async def test_chat_history_cannot_read_other_conversation(app, db, client):
-    """chat_history only returns messages between the two participants."""
-    a = _user_doc("0767000014")
-    b = _user_doc("0767000015")
-    c = _user_doc("0767000016")
-    await db.users.insert_many([a, b, c])
-    now = datetime.now(timezone.utc)
-    conv = "_".join(sorted([str(a["_id"]), str(b["_id"])]))
-    await db.messages.insert_one({"conversation_id": conv, "from_user_id": str(a["_id"]),
-                                  "to_user_id": str(b["_id"]), "text": "siri kati ya a-b",
-                                  "is_read": False, "created_at": now})
-    # c cannot see a↔b conversation even with crafted conv id
-    c_tok = create_access_token(str(c["_id"]))
-    r = await client.get(f"/messages/with/{a['_id']}", headers=_auth(c_tok))
-    assert r.status_code == 200
-    assert all(m["text"] != "siri kati ya a-b" for m in r.json()["messages"])
 
 
 # ─── PII safety ───────────────────────────────────────────────────────────

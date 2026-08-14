@@ -269,6 +269,13 @@ async def test_board_subject_filter_all_any_none_and_search(app, db, client):
     """Kichujio kipya cha masomo: all (masomo yote mawili), any (somo moja),
     none (wasio match), subject_q (search kwa masomo maalum)."""
     await db.cadres.insert_one({"code": "TEACHER_PRIMARY", "category": "education", "level": "Primary"})
+    # subject_q inatafuta kwenye `subjects` collection (codes + majina) —
+    # masomo haya yanahitajika ili kichujio kifanye kazi kama production.
+    await db.subjects.insert_many([
+        {"code": "MATH", "name": "Mathematics", "level": "Primary"},
+        {"code": "KISWAHILI", "name": "Kiswahili", "level": "Primary"},
+        {"code": "SCIENCE", "name": "Science", "level": "Primary"},
+    ])
     me = _user("+255711100001", region_id=4, region_name="Dodoma", dest_region_ids=[3],
                cadre="TEACHER_PRIMARY", cadre_display="Mwalimu wa Elimu ya Msingi",
                category="education", subjects=["MATH", "KISWAHILI"])

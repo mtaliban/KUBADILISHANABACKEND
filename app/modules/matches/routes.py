@@ -204,9 +204,27 @@ async def board(
         elif sf == "none":
             raw = [u for u in raw if _subjects_no_match(my_subjects, u.get("subjects") or [])]
         if subject_q:
-            codes = [c.strip().upper() for c in subject_q.split(",") if c.strip()]
-            if codes:
-                raw = [u for u in raw if any(c in (u.get("subjects") or []) for c in codes)]
+            # Search inaweza kutumia CODES au MAJINA (k.m. "Kiswahili, English" →
+            # KISW_MSINGI + ENGLISH_MSINGI) — hata masomo mawili kwa pamoja.
+            terms = [c.strip() for c in subject_q.split(",") if c.strip()]
+            if terms:
+                subj_rows = [d async for d in db.subjects.find({}, {"_id": 0, "code": 1, "name": 1})]
+                code_of_name = {s["name"].strip().lower(): s["code"] for s in subj_rows}
+                wanted: set[str] = set()
+                for term in terms:
+                    t = term.strip().upper()
+                    exact_name = code_of_name.get(term.strip().lower())
+                    if exact_name:
+                        wanted.add(exact_name)
+                    elif t in {s["code"] for s in subj_rows}:
+                        wanted.add(t)
+                    else:
+                        # Sehemu ya jina/code (k.m. "KISW" au "Kiswah")
+                        for s in subj_rows:
+                            if t in s["code"].upper() or t in s["name"].upper():
+                                wanted.add(s["code"])
+                if wanted:
+                    raw = [u for u in raw if any(w in (u.get("subjects") or []) for w in wanted)]
 
     if scope == "incoming":
         # Wanaokuja mkoa wako (same idara, kada yoyote) — wanataka kuja kwako.

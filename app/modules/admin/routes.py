@@ -12,20 +12,34 @@ logger = logging.getLogger(__name__)
 from typing import Optional, Literal
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pymongo.errors import DuplicateKeyError
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from ...config import settings
 from ...db import get_db
 from ...events.publisher import publish
 from ...events.topics import (
-    TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED, TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
+    TOPIC_USER_REGISTERED, TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED,
+    TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
     TOPIC_DATA_SUBJECTS_CHANGED, TOPIC_DATA_CADRES_CHANGED,
     TOPIC_DATA_REGIONS_CHANGED, TOPIC_DATA_DISTRICTS_CHANGED,
+    TOPIC_DATA_FACILITIES_CHANGED,
 )
-from ...security import current_admin, current_user, _is_valid_object_id, hash_password
+from ...security import current_admin, current_user, _is_valid_object_id, hash_password, normalize_phone, normalize_email
 from ...cache import get_redis
+from ..messaging.ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+async def _push_ws(user_id: str, payload: dict) -> None:
+    """Push a real-time WS event to a specific user (in-process, same app).
+    Hii ndiyo inayofanya: admin akisuspend/kuupdate/kufuta mtumiaji, mabadiliko
+    yanamfika mtumiaji huyo PAPO HAPO bila refresh (forced logout kama disabled)."""
+    try:
+        await ws_manager.send_to_user(user_id, payload)
+    except Exception:
+        pass
 
 
 # ─── Redis cache kwa admin data ───────────────────────────────────────────
@@ -151,6 +165,116 @@ async def list_users(_=Depends(current_admin),
     return result
 
 
+class AdminCreateUser(BaseModel):
+    """Admin anaunda mtumiaji au ADMIN mpya moja kwa moja kwenye mfumo.
+    Admini wana EMAIL + jina + role (hawapo kwenye idara yoyote); watumiaji
+    wa kawaida wanahitaji idara/kada/kituo kama usajili wa kawaida."""
+    full_name: str = Field(..., min_length=2, max_length=100)
+    email: str | None = None
+    phone_primary: str | None = None
+    phone_alt: str | None = None
+    password: str = Field(..., min_length=6)
+    is_admin: bool = False
+    status: str = Field("active", pattern="^(active|disabled|inactive)$")
+    category: Optional[Literal["health", "education"]] = None
+    cadre_code: str | None = None
+    subjects: list[str] = Field(default_factory=list)
+    current_station: dict | None = None
+    desired_destinations: list[dict] = Field(default_factory=list)
+    is_verified: bool = False
+
+
+@router.post("/users", status_code=201)
+async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
+    """Create user/admin directly (kwa taarifa zote).
+    - is_admin=True → email inahitajika; hakuna idara/kada inayohitajika.
+    - is_admin=False → category + cadre_code + current_station zinahitajika.
+    Akaunti mpya inajitokeza kwenye admin users list PAPO HAPO (real-time)
+    kupitia WS event ya user.registered."""
+    db = get_db()
+    now = datetime.now(timezone.utc)
+
+    if body.is_admin:
+        if not body.email:
+            raise HTTPException(422, "Admin anahitaji barua pepe (email)")
+        try:
+            email = normalize_email(body.email)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        if await db.users.find_one({"email": email}):
+            raise HTTPException(409, "Email hii inatumiwa na akaunti nyingine")
+    else:
+        email = None
+        if not body.category or not body.cadre_code:
+            raise HTTPException(422, "Mtumiaji anahitaji idara (category) na kada (cadre_code)")
+        if not body.phone_primary:
+            raise HTTPException(422, "Mtumiaji anahitaji namba ya simu")
+
+    phone = phone_alt = None
+    if body.phone_primary:
+        try:
+            phone = normalize_phone(body.phone_primary)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        if await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]}):
+            raise HTTPException(409, "Namba hii ya simu tayari inatumiwa")
+    if body.phone_alt:
+        try:
+            phone_alt = normalize_phone(body.phone_alt)
+        except ValueError as e:
+            raise HTTPException(422, f"phone_alt: {e}")
+
+    cadre_display = None
+    if body.cadre_code:
+        cadre = await db.cadres.find_one({"code": body.cadre_code}, {"_id": 0, "display_name": 1, "category": 1})
+        if not cadre:
+            raise HTTPException(422, f"Unknown cadre_code: {body.cadre_code}")
+        if body.category and cadre["category"] != body.category:
+            raise HTTPException(422, f"cadre {body.cadre_code} belongs to '{cadre['category']}', not '{body.category}'")
+        cadre_display = cadre["display_name"]
+
+    doc = {
+        "full_name": body.full_name.strip(),
+        "email": email,
+        "phone_primary": phone, "phone_alt": phone_alt,
+        "password_hash": hash_password(body.password),
+        "category": body.category,
+        "cadre_code": body.cadre_code, "cadre_display": cadre_display,
+        "subjects": body.subjects,
+        "current_station": body.current_station,
+        "desired_destinations": body.desired_destinations,
+        "status": body.status, "is_verified": body.is_verified,
+        "is_admin": body.is_admin,
+        # Admin aliyeundwa na admin mkuu (aliyethibitishwa) — email imethibitishwa
+        # tayari; hakuna haja ya mtiririko wa code tena.
+        "email_verified": body.is_admin or False,
+        "notification_prefs": {"new_matches": True, "messages": True},
+        "followed_regions": [],
+        "created_at": now, "updated_at": now, "last_seen_at": now,
+    }
+    try:
+        result = await db.users.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(409, "Phone/email tayari inatumiwa")
+    uid = str(result.inserted_id)
+    await _bust_admin_caches()
+    # Real-time: admin users list inapata mtu mpya PAPO HAPO (same funnel kama
+    # usajili wa kawaida — board/arifa zote zinafanya kazi sawa).
+    publish(TOPIC_USER_REGISTERED, {
+        "event": "user.registered", "user_id": uid,
+        "full_name": doc["full_name"], "phone_primary": phone,
+        "email": email, "category": body.category, "cadre_code": body.cadre_code,
+        "cadre_display": cadre_display, "subjects": body.subjects,
+        "current_station": body.current_station,
+        "desired_destinations": body.desired_destinations,
+        "is_admin": body.is_admin,
+        "occurred_at": now.isoformat(),
+    })
+    fresh = await db.users.find_one({"_id": result.inserted_id}, {"password_hash": 0})
+    fresh["_id"] = uid
+    return fresh
+
+
 @router.get("/matches")
 async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)):
     db = get_db(); total = await db.matches.count_documents({})
@@ -223,7 +347,9 @@ async def live_events(_=Depends(current_admin)):
 
 class AdminUpdateUser(BaseModel):
     full_name: str | None = Field(None, min_length=3, max_length=100)
+    phone_primary: str | None = None
     phone_alt: str | None = None
+    email: str | None = None
     category: str | None = None
     cadre_code: str | None = None
     subjects: list[str] | None = None
@@ -240,6 +366,16 @@ async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(curre
     updates = body.model_dump(exclude_none=True)
     if "new_password" in updates:
         updates["password_hash"] = hash_password(updates.pop("new_password"))
+    if "phone_primary" in updates and updates["phone_primary"]:
+        try:
+            updates["phone_primary"] = normalize_phone(updates["phone_primary"])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+    if "email" in updates and updates["email"]:
+        try:
+            updates["email"] = normalize_email(updates["email"])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
     # Kada inabadilishwa → sasisha pia cadre_display (jina linaloonekana) ili
     # wasifu na cards zioneshe kada sahihi, sio ya zamani.
     if "cadre_code" in updates:
@@ -263,24 +399,163 @@ async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(curre
     fresh = await get_db().users.find_one({"_id": oid}, {"password_hash": 0})
     fresh["_id"] = str(fresh["_id"])
     await _bust_admin_caches()
+    # REAL-TIME: mabadiliko yote ya admin yanamfikia mtumiaji PAPO HAPO —
+    # jina/kada/status ikibadilishwa, anayeingia anaona mara moja bila refresh.
+    await _push_ws(user_id, {
+        "event": "user.updated_by_admin", "user_id": user_id,
+        "user": {"user_id": user_id, "full_name": fresh.get("full_name"),
+                  "phone_primary": fresh.get("phone_primary"),
+                  "category": fresh.get("category"), "cadre_code": fresh.get("cadre_code"),
+                  "cadre_display": fresh.get("cadre_display"),
+                  "current_station": fresh.get("current_station"),
+                  "desired_destinations": fresh.get("desired_destinations", []),
+                  "subjects": fresh.get("subjects", []),
+                  "email": fresh.get("email"), "is_admin": fresh.get("is_admin", False)},
+        "changed_fields": [k for k in updates if k not in ("updated_at", "password_hash")],
+        "occurred_at": updates["updated_at"].isoformat(),
+    })
+    # Suspend (single) → forced logout mara moja kwa mtumiaji aliyeingia.
+    if updates.get("status") == "disabled":
+        await _push_ws(user_id, {
+            "event": "account.disabled", "user_id": user_id,
+            "message": "Akaunti yako imesitishwa na admin.",
+            "occurred_at": updates["updated_at"].isoformat(),
+        })
     return fresh
 
 
-@router.delete("/users/{user_id}")
-async def admin_delete_user(user_id: str, _=Depends(current_admin)):
+# ─── Trash (soft delete → restore | permanent delete) ─────────────────────
+# Kufuta mtumiaji hakumfuti kabisa: akaunti inahamishwa kwenye `trash`
+# collection. Admin anaweza KURUDISHA (restore) au KUFUTA KABISA (permanent).
+
+async def _move_to_trash(db, oid, admin) -> dict | None:
+    doc = await db.users.find_one({"_id": oid})
+    if not doc:
+        return None
+    now = datetime.now(timezone.utc)
+    trash_doc = dict(doc)
+    trash_doc["trashed_at"] = now
+    trash_doc["trashed_by"] = str(admin["_id"]) if admin else None
+    await db.trash.insert_one(trash_doc)
+    uid = str(doc["_id"])
+    await db.users.delete_one({"_id": oid})
+    # Matches za kale hazifai tena (user hayupo) — zitarecompute kwenye restore.
+    await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+    return trash_doc
+
+
+async def _purge_user_data(db, user_id: str, oid) -> None:
+    """Futa data zote za mtumiaji (permanent delete)."""
+    await db.messages.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    await db.notifications.delete_many({"user_id": user_id})
+    await db.call_logs.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    await db.page_views.delete_many({"user_id": user_id})
+    await db.event_log.delete_many({"actor_user_id": user_id})
+    await db.login_otps.delete_many({"user_id": oid})
+    await db.password_resets.delete_many({"user_id": oid})
+    await db.email_verifications.delete_many({"user_id": oid})
+
+
+@router.get("/users/trash")
+async def admin_trash_list(_=Depends(current_admin), q: Optional[str] = None,
+                           limit: int = Query(100, le=500)):
+    db = get_db()
+    qd: dict = {}
+    if q:
+        qd["$or"] = [{"full_name": {"$regex": _escape_regex(q), "$options": "i"}},
+                      {"phone_primary": {"$regex": _escape_regex(q)}}]
+    total = await db.trash.count_documents(qd)
+    cur = db.trash.find(qd, {"password_hash": 0}).sort("trashed_at", -1).limit(limit)
+    items = []
+    async for u in cur:
+        u["_id"] = str(u["_id"])
+        items.append(u)
+    return {"total": total, "items": items}
+
+
+@router.post("/users/trash/{user_id}/restore")
+async def admin_trash_restore(user_id: str, admin=Depends(current_admin)):
     db = get_db()
     oid = _as_object_id(user_id)
-    r = await db.users.delete_one({"_id": oid})
-    if not r.deleted_count:
-        raise HTTPException(404, "User not found")
-    await db.matches.delete_many({"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]})
-    await db.messages.delete_many({"$or": [{"from_user_id": user_id}, {"to_user_id": user_id}]})
+    doc = await db.trash.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(404, "User not found in trash")
+    doc.pop("trashed_at", None); doc.pop("trashed_by", None)
+    doc.pop("_id", None)
+    await db.users.insert_one(doc)
+    await db.trash.delete_one({"_id": oid})
     await _bust_admin_caches()
-    publish(TOPIC_USER_DELETED, {
-        "event": "user.deleted", "user_id": user_id,
+    # Restore inarudisha mtu kwenye board/matches — recompute papo hapo.
+    publish(TOPIC_USER_UPDATED_BY_ADMIN, {
+        "event": "user.updated_by_admin", "user_id": user_id,
+        "changed_fields": ["restored"], "status": "active",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     })
-    return {"ok": True, "deleted_user_id": user_id}
+    return {"ok": True, "restored_user_id": user_id}
+
+
+@router.delete("/users/trash/{user_id}")
+async def admin_trash_purge(user_id: str, _=Depends(current_admin)):
+    """Futa KABISA (permanent) — data yote ya mtu huyu inaondoka milele."""
+    db = get_db()
+    oid = _as_object_id(user_id)
+    doc = await db.trash.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(404, "User not found in trash")
+    uid = str(doc["_id"])
+    await _purge_user_data(db, uid, oid)
+    await db.trash.delete_one({"_id": oid})
+    await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+    await _bust_admin_caches()
+    publish(TOPIC_USER_DELETED, {
+        "event": "user.deleted", "user_id": uid, "permanent": True,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "purged_user_id": uid}
+
+
+@router.delete("/users/trash")
+async def admin_trash_purge_bulk(ids: list[str] = Query(...), _=Depends(current_admin)):
+    """Futa KABISA watumiaji wengi wa trash kwa pamoja (checkbox)."""
+    db = get_db()
+    purged = 0
+    for uid in ids:
+        if not _is_valid_object_id(uid):
+            continue
+        oid = ObjectId(uid)
+        doc = await db.trash.find_one({"_id": oid})
+        if not doc:
+            continue
+        await _purge_user_data(db, uid, oid)
+        await db.trash.delete_one({"_id": oid})
+        await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+        purged += 1
+    await _bust_admin_caches()
+    return {"ok": True, "purged": purged}
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(user_id: str, admin=Depends(current_admin)):
+    """Soft delete → akaunti inaenda TRASH (inaweza kurudishwa). Mtumiaji
+    mwenyewe (kama yuko online) anatolewa PAPO HAPO (WS account.deleted)."""
+    db = get_db()
+    oid = _as_object_id(user_id)
+    doc = await _move_to_trash(db, oid, admin)
+    if doc is None:
+        raise HTTPException(404, "User not found")
+    await _bust_admin_caches()
+    now = datetime.now(timezone.utc)
+    publish(TOPIC_USER_DELETED, {
+        "event": "user.deleted", "user_id": user_id,
+        "occurred_at": now.isoformat(),
+    })
+    # Real-time: mtumiaji aliyefutwa anatolewa kwenye session yake mara moja.
+    await _push_ws(user_id, {
+        "event": "account.deleted", "user_id": user_id,
+        "message": "Akaunti yako imefutwa na admin.",
+        "occurred_at": now.isoformat(),
+    })
+    return {"ok": True, "deleted_user_id": user_id, "trashed": True}
 
 
 class BulkUsersRequest(BaseModel):
@@ -312,18 +587,15 @@ async def admin_bulk_users(body: BulkUsersRequest, admin=Depends(current_admin))
     for u in targets:
         uid = str(u["_id"])
         if body.action == "delete":
-            await db.users.delete_one({"_id": u["_id"]})
-            await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
-            await db.messages.delete_many({"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
-            await db.notifications.delete_many({"user_id": uid})
-            await db.call_logs.delete_many({"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
-            await db.page_views.delete_many({"user_id": uid})
-            await db.event_log.delete_many({"actor_user_id": uid})
-            await db.login_otps.delete_many({"user_id": u["_id"]})
-            await db.password_resets.delete_many({"user_id": u["_id"]})
-            await db.email_verifications.delete_many({"user_id": u["_id"]})
+            # Soft delete → TRASH (inaweza kurudishwa) kama delete ya mtu mmoja.
+            await _move_to_trash(db, u["_id"], admin)
             publish(TOPIC_USER_DELETED, {
                 "event": "user.deleted", "user_id": uid,
+                "occurred_at": now.isoformat(),
+            })
+            await _push_ws(uid, {
+                "event": "account.deleted", "user_id": uid,
+                "message": "Akaunti yako imefutwa na admin.",
                 "occurred_at": now.isoformat(),
             })
         else:
@@ -334,6 +606,13 @@ async def admin_bulk_users(body: BulkUsersRequest, admin=Depends(current_admin))
                 "changed_fields": ["status"], "status": status,
                 "occurred_at": now.isoformat(),
             })
+            # Suspend → mtumiaji anatolewa kwenye session mara moja (real-time).
+            if status == "disabled":
+                await _push_ws(uid, {
+                    "event": "account.disabled", "user_id": uid,
+                    "message": "Akaunti yako imesitishwa na admin.",
+                    "occurred_at": now.isoformat(),
+                })
         processed += 1
     await _bust_admin_caches()
     return {"ok": True, "action": body.action, "processed": processed,
@@ -455,6 +734,43 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     users_by_category = [{"category": "health", "count": await db.users.count_documents({"category": "health"})},
                          {"category": "education", "count": await db.users.count_documents({"category": "education"})}]
 
+    # ── WANAOKUJA KILA MKOA (incoming) ── watumiaji wanaotaka kwenda mkoa
+    # fulani (desired_destinations) — hii ndiyo inaonyesha "watu wanaohamia"
+    # kwenye dashboard ya admin, kwa kila mkoa (na wilaya/kituo ikiwa wamesema).
+    incoming_by_region = []
+    async for r in db.users.aggregate([
+        {"$unwind": "$desired_destinations"},
+        {"$group": {"_id": {"region_id": "$desired_destinations.region_id",
+                             "name": "$desired_destinations.region_name"},
+                     "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]):
+        incoming_by_region.append({"region_id": r["_id"]["region_id"], "region": r["_id"]["name"], "count": r["n"]})
+
+    incoming_by_district = []
+    async for r in db.users.aggregate([
+        {"$unwind": "$desired_destinations"},
+        {"$group": {"_id": {"region": "$desired_destinations.region_name",
+                             "district": "$desired_destinations.district_name"},
+                     "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]):
+        incoming_by_district.append({"region": r["_id"]["region"], "district": r["_id"]["district"], "count": r["n"]})
+
+    # Users kwa KITUO (facility/school) cha sasa — ngazi ya mwisho ya breakdown.
+    users_by_facility = []
+    async for r in db.users.aggregate([
+        {"$group": {"_id": {"facility_id": "$current_station.facility_id",
+                             "facility_name": "$current_station.facility_name",
+                             "district": "$current_station.district_name",
+                             "region": "$current_station.region_name"},
+                     "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+        {"$limit": 200},
+    ]):
+        users_by_facility.append({"facility_id": r["_id"]["facility_id"], "facility": r["_id"]["facility_name"],
+                                 "district": r["_id"]["district"], "region": r["_id"]["region"], "count": r["n"]})
+
     result = {
         "period_days": days, "since": since.isoformat(),
         "revenue": {"total_tzs": total_revenue, "paid_count": paid_count, "per_purpose": per_purpose},
@@ -466,6 +782,9 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
         "users_by_cadre": users_by_cadre,
         "users_by_status": users_by_status,
         "users_by_category": users_by_category,
+        "incoming_by_region": incoming_by_region,
+        "incoming_by_district": incoming_by_district,
+        "users_by_facility": users_by_facility,
     }
     await _cache_set(cache_key, result, 30)
     return result
@@ -688,6 +1007,149 @@ async def data_districts_delete(district_id: int, admin=Depends(current_admin)):
     await _bust_location_caches()
     await _publish_data_event(TOPIC_DATA_DISTRICTS_CHANGED, "data.district_deleted", "district", "deleted", {"id": district_id}, admin)
     return {"ok": True, "deleted": district_id}
+
+
+# ─── VITUO (facilities/schools) — CRUD ndani ya wilaya, real-time ─────────
+# Vituo vya AFYA viko kwenye `health_facilities` (vinahifadhiwa kwa jina la
+# wilaya/mkoa); SHULE ziko kwenye `schools` (district_id/region_id namba).
+# Mabadiliko yote yanatokea kwenye event stream → admin data page inaona
+# PAPO HAPO bila refresh (data.facility_*).
+
+class FacilityIn(BaseModel):
+    category: Literal["health", "education"]
+    name: str = Field(..., min_length=2, max_length=200)
+    region_id: int
+    district_id: int
+    # health facility
+    code: str | None = None
+    type: str | None = None
+    # school
+    school_code: str | None = None
+    level: str | None = Field(None, pattern="^(Primary|Secondary)$")
+    ownership: str | None = None
+
+
+@router.get("/data/facilities")
+async def data_facilities(_=Depends(current_admin),
+                          category: Literal["health", "education"] = "health",
+                          region_id: Optional[int] = None,
+                          district_id: Optional[int] = None,
+                          q: Optional[str] = None,
+                          limit: int = Query(200, le=1000)):
+    db = get_db()
+    qd: dict = {}
+    if q:
+        qd["name"] = {"$regex": _escape_regex(q), "$options": "i"}
+    if category == "education":
+        if region_id: qd["region_id"] = region_id
+        if district_id: qd["district_id"] = district_id
+        cursor = db.schools.find(qd, {"_id": 0}).sort("name", 1).limit(limit)
+        return {"category": "education", "items": [d async for d in cursor]}
+    # Afya: wilaya/mkoa vimehifadhiwa kwa JINA → map id→jina kwa kuchuja.
+    if district_id:
+        district = await db.districts.find_one({"id": district_id}, {"_id": 0, "name": 1})
+        if district: qd["district"] = district["name"]
+    elif region_id:
+        region = await db.regions.find_one({"id": region_id}, {"_id": 0, "name": 1})
+        if region: qd["region"] = region["name"]
+    cursor = db.health_facilities.find(qd, {"_id": 0}).sort("name", 1).limit(limit)
+    return {"category": "health", "items": [d async for d in cursor]}
+
+
+@router.post("/data/facilities")
+async def data_facilities_add(body: FacilityIn, admin=Depends(current_admin)):
+    db = get_db()
+    district = await db.districts.find_one({"id": body.district_id}, {"_id": 0, "name": 1})
+    if not district:
+        raise HTTPException(404, "Wilaya haipo")
+    region = await db.regions.find_one({"id": body.region_id}, {"_id": 0, "name": 1})
+    if not region:
+        raise HTTPException(404, "Mkoa haupo")
+
+    if body.category == "education":
+        if not body.level:
+            raise HTTPException(422, "Shule inahitaji kiwango (Primary/Secondary)")
+        nid = await _next_id(db, "schools")
+        school_code = (body.school_code or f"SCH-{nid:04d}").strip().upper()
+        if await db.schools.find_one({"school_code": school_code}):
+            raise HTTPException(409, f"Shule '{school_code}' tayari ipo")
+        doc = {
+            "id": nid, "school_code": school_code, "name": body.name.strip(),
+            "district_id": body.district_id, "district_name": district["name"],
+            "region_id": body.region_id, "region_name": region["name"],
+            "level": body.level, "ownership": body.ownership or "Government",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.schools.insert_one(dict(doc))
+        doc.pop("created_at", None)
+    else:
+        code = (body.code or f"HF-{body.district_id}-{body.name[:3].upper()}").strip().upper()
+        if await db.health_facilities.find_one({"code": code}):
+            raise HTTPException(409, f"Kituo '{code}' tayari kipo")
+        doc = {
+            "code": code, "name": body.name.strip(),
+            "type": body.type or "Dispensary", "type_category": body.type or "",
+            "region": region["name"], "district": district["name"],
+            "region_id": body.region_id, "district_id": body.district_id,
+            "status": "Active", "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.health_facilities.insert_one(dict(doc))
+        doc.pop("created_at", None)
+
+    await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_FACILITIES_CHANGED, "data.facility_added", "facility", "added", doc, admin)
+    return {"ok": True, "facility": doc}
+
+
+@router.patch("/data/facilities/{facility_id}")
+async def data_facilities_update(facility_id: str, body: FacilityIn, admin=Depends(current_admin)):
+    db = get_db()
+    updates = body.model_dump(exclude_none=True)
+    updates.pop("category", None)
+    district = await db.districts.find_one({"id": body.district_id}, {"_id": 0, "name": 1})
+    if district:
+        updates["district_name"] = district["name"]
+        updates["district"] = district["name"]
+    region = await db.regions.find_one({"id": body.region_id}, {"_id": 0, "name": 1})
+    if region:
+        updates["region_name"] = region["name"]
+        updates["region"] = region["name"]
+    if body.category == "education":
+        try:
+            sid = int(facility_id)
+        except ValueError:
+            raise HTTPException(400, "Invalid school id")
+        r = await db.schools.update_one({"id": sid}, {"$set": updates})
+        if not r.matched_count:
+            raise HTTPException(404, "Shule haipo")
+    else:
+        r = await db.health_facilities.update_one({"code": facility_id}, {"$set": updates})
+        if not r.matched_count:
+            raise HTTPException(404, "Kituo hakipo")
+    await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_FACILITIES_CHANGED, "data.facility_updated", "facility", "updated", updates, admin)
+    return {"ok": True}
+
+
+@router.delete("/data/facilities/{facility_id}")
+async def data_facilities_delete(facility_id: str, admin=Depends(current_admin),
+                                 category: Literal["health", "education"] = "health"):
+    db = get_db()
+    if category == "education":
+        try:
+            sid = int(facility_id)
+        except ValueError:
+            raise HTTPException(400, "Invalid school id")
+        r = await db.schools.delete_one({"id": sid})
+        if not r.deleted_count:
+            raise HTTPException(404, "Shule haipo")
+    else:
+        r = await db.health_facilities.delete_one({"code": facility_id})
+        if not r.deleted_count:
+            raise HTTPException(404, "Kituo hakipo")
+    await _bust_location_caches()
+    await _publish_data_event(TOPIC_DATA_FACILITIES_CHANGED, "data.facility_deleted", "facility", "deleted", {"id": facility_id}, admin)
+    return {"ok": True, "deleted": facility_id}
 
 
 @router.get("/reports/export")
