@@ -717,22 +717,42 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     ]):
         users_by_district.append({"region": r["_id"]["region"], "district": r["_id"]["district"], "count": r["n"]})
 
-    # Users kwa kada
+    # Users kwa kada — pamoja na JINA la kada na LEVEL (Primary/Secondary)
+    # ili admin aone "Walimu wa Secondary wangapi" (na kada nyingine).
+    cadre_meta = {}
+    async for c in db.cadres.find({}, {"_id": 0, "code": 1, "display_name": 1, "level": 1, "category": 1}):
+        cadre_meta[c["code"]] = c
     users_by_cadre = []
     async for r in db.users.aggregate([
         {"$group": {"_id": {"cat": "$category", "cadre": "$cadre_code"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
-        users_by_cadre.append({"category": r["_id"]["cat"], "cadre": r["_id"]["cadre"], "count": r["n"]})
+        code = r["_id"]["cadre"] or "-"
+        meta = cadre_meta.get(code, {})
+        users_by_cadre.append({
+            "category": r["_id"]["cat"],
+            "cadre": code,
+            "cadre_name": meta.get("display_name") or code,
+            "level": meta.get("level"),
+            "count": r["n"],
+        })
 
     # Users kwa status
     users_by_status = []
     async for r in db.users.aggregate([{"$group": {"_id": "$status", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}]):
         users_by_status.append({"status": r["_id"] or "unknown", "count": r["n"]})
 
-    # Users kwa idara
-    users_by_category = [{"category": "health", "count": await db.users.count_documents({"category": "health"})},
-                         {"category": "education", "count": await db.users.count_documents({"category": "education"})}]
+    # Users kwa idara — DYNAMIC: idara zote kutoka `departments` (health,
+    # education na zozote mpya alizoziongeza admin), kila moja na hesabu yake.
+    await _ensure_default_departments(db)
+    dept_names = {d["code"]: d["name"] for d in await db.departments.find({}, {"_id": 0, "code": 1, "name": 1}).to_list(200)}
+    users_by_category = []
+    async for r in db.users.aggregate([
+        {"$group": {"_id": "$category", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]):
+        cat = r["_id"] or "unknown"
+        users_by_category.append({"category": cat, "name": dept_names.get(cat, cat), "count": r["n"]})
 
     # ── WANAOKUJA KILA MKOA (incoming) ── watumiaji wanaotaka kwenda mkoa
     # fulani (desired_destinations) — hii ndiyo inaonyesha "watu wanaohamia"
