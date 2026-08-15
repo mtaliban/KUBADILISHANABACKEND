@@ -683,9 +683,9 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
 
-    # Total revenue (approved donations only)
+    # Total revenue (approved donations only) — katika kipindi kilichochaguliwa
     rev_agg = await db.payments.aggregate([
-        {"$match": {"status": "approved"}},
+        {"$match": {"status": "approved", "created_at": {"$gte": since}}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
     ]).to_list(1)
     total_revenue = rev_agg[0]["total"] if rev_agg else 0
@@ -694,7 +694,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Revenue per donation purpose
     per_purpose = []
     async for r in db.payments.aggregate([
-        {"$match": {"status": "approved"}},
+        {"$match": {"status": "approved", "created_at": {"$gte": since}}},
         {"$group": {"_id": "$purpose", "total": {"$sum": "$amount"}, "n": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]):
@@ -729,9 +729,11 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
         top_pages.append({"path": r["_id"], "views": r["n"], "unique_users": len(r["unique_users"])})
 
     # ── NUMBERS (namba halisi, siyo michoro tu) ──
-    # Users kwa mkoa (kituo cha sasa) — kila mkoa iko na hesabu yake.
+    # Users kwa mkoa (kituo cha sasa) — kila mkoa iko na hesabu yake (kipindi
+    # kilichochaguliwa kwenye dropdown).
     users_by_region = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$group": {"_id": {"region_id": "$current_station.region_id", "name": "$current_station.region_name"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -740,6 +742,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Users kwa wilaya
     users_by_district = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$group": {"_id": {"region": "$current_station.region_name", "district": "$current_station.district_name"},
                      "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
@@ -753,6 +756,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
         cadre_meta[c["code"]] = c
     users_by_cadre = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$group": {"_id": {"cat": "$category", "cadre": "$cadre_code"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -768,7 +772,9 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
 
     # Users kwa status
     users_by_status = []
-    async for r in db.users.aggregate([{"$group": {"_id": "$status", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}]):
+    async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}]):
         users_by_status.append({"status": r["_id"] or "unknown", "count": r["n"]})
 
     # Users kwa idara — DYNAMIC: idara zote kutoka `departments` (health,
@@ -777,6 +783,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     dept_names = {d["code"]: d["name"] for d in await db.departments.find({}, {"_id": 0, "code": 1, "name": 1}).to_list(200)}
     users_by_category = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$group": {"_id": "$category", "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -788,6 +795,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # kwenye dashboard ya admin, kwa kila mkoa (na wilaya/kituo ikiwa wamesema).
     incoming_by_region = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$unwind": "$desired_destinations"},
         {"$group": {"_id": {"region_id": "$desired_destinations.region_id",
                              "name": "$desired_destinations.region_name"},
@@ -798,6 +806,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
 
     incoming_by_district = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$unwind": "$desired_destinations"},
         {"$group": {"_id": {"region": "$desired_destinations.region_name",
                              "district": "$desired_destinations.district_name"},
@@ -809,6 +818,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Users kwa KITUO (facility/school) cha sasa — ngazi ya mwisho ya breakdown.
     users_by_facility = []
     async for r in db.users.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
         {"$group": {"_id": {"facility_id": "$current_station.facility_id",
                              "facility_name": "$current_station.facility_name",
                              "district": "$current_station.district_name",
