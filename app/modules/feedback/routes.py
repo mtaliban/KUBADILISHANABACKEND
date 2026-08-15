@@ -55,16 +55,20 @@ async def submit_feedback(body: FeedbackCreate, user=Depends(current_user)):
     r = await db.feedback.insert_one(doc)
     fid = str(r.inserted_id)
     # Real-time: admin anajulishwa PAPO HAPO (WS) — maoni mapya yanaonekana
-    # kwenye page ya admin bila refresh. Same funnel kama notifications.
+    # kwenye page ya admin bila refresh. Same funnel kama notifications
+    # (event="notification" + type) — browser inasikia channel notification.
     admins = [str(u["_id"]) async for u in db.users.find({"is_admin": True}, {"_id": 1})]
+    out = _out(doc)
     for aid in admins:
         await manager.send_to_user(aid, {
-            "event": "feedback.new",
+            "event": "notification",
             "type": "feedback.new",
-            "feedback": _out(doc),
+            "title": "Maoni mapya ya mtumiaji 💬",
+            "body": f"{doc.get('subject', '')} — {doc.get('user_name', '')}",
+            "feedback": out,
             "occurred_at": now.isoformat(),
         })
-    return _out(doc)
+    return out
 
 
 @router.get("/my")
@@ -127,8 +131,10 @@ async def admin_reply(feedback_id: str, body: FeedbackReply, _=Depends(current_a
     )
     # Real-time kwa mtumiaji: jibu linaonekana PAPO HAPO (bila refresh).
     await manager.send_to_user(f["user_id"], {
-        "event": "feedback.replied",
+        "event": "notification",
         "type": "feedback.replied",
+        "title": "Jibu la Admin kwenye maoni yako 👑",
+        "body": body.reply.strip()[:120],
         "feedback": _out({**f, "status": "replied", "admin_reply": body.reply.strip(),
                           "admin_replied_at": now}),
         "occurred_at": now.isoformat(),
