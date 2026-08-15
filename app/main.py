@@ -1,3 +1,5 @@
+import gzip
+import io
 import logging
 import os
 import time
@@ -5,8 +7,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.gzip import GZipMiddleware
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import settings
 from .events.subscriber import start_subscriber, stop_subscriber
@@ -58,7 +61,125 @@ analytics) run in the same process for simplicity.
     lifespan=lifespan,
 )
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+class _SSEAwareGzipResponder:
+    """Gzip streaming hiyo hiyo ya Starlette, ila SSE haijabanwi kamwe.
+
+    Starlette GZipMiddleware inagzip streaming responses chunk-kwa-chunk,
+    lakini gzip stream hifflushi tu baada ya ~8KB. SSE events ni ndogo
+    (mamia ya bytes) — zilibaki kwenye buffer na browser ilipata BYTES 0
+    kutoka /admin/live-events. Hii ndiyo ilikuwa sababu ya "events page sio
+    real-time" — data ilionekana tu baada ya refresh! Sasa SSE inapita
+    raw (bila gzip) ili kila event ifike PAPO HAPO.
+    """
+
+    def __init__(self, app: ASGIApp, minimum_size: int = 500) -> None:
+        self.app = app
+        self.minimum_size = minimum_size
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        if "gzip" not in headers.get("Accept-Encoding", ""):
+            await self.app(scope, receive, send)
+            return
+        responder = _GzipResponder(self.app, self.minimum_size)
+        await responder(scope, receive, send)
+
+
+class _GzipResponder:
+    """Same streaming gzip logic as Starlette's GZipResponder, with an SSE bypass:
+    kwa response za Content-Type: text/event-stream, mabodi yanapita RAW (sio
+    gzipped) — vinginevyo gzip buffer inazuia events ndogo kufika kwa muda.
+    """
+
+    def __init__(self, app: ASGIApp, minimum_size: int) -> None:
+        self.app = app
+        self.minimum_size = minimum_size
+        self.send: Send | None = None
+        self.initial_message: Message | None = None
+        self.started = False
+        self.content_encoding_set = False
+        self.is_sse = False
+        self.buffer = io.BytesIO()
+        self.gzip_file = gzip.GzipFile(mode="wb", fileobj=self.buffer)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        self.send = send
+        with self.buffer, self.gzip_file:
+            await self.app(scope, receive, self._send_with_gzip)
+
+    async def _send_with_gzip(self, message: Message) -> None:
+        if message["type"] == "http.response.start":
+            self.initial_message = message
+            headers = Headers(raw=self.initial_message["headers"])
+            self.content_encoding_set = "content-encoding" in headers
+            ct = headers.get("Content-Type", "")
+            if ct.startswith("text/event-stream"):
+                # SSE → usigzip: tuma headers na mabodi yote RAW.
+                self.is_sse = True
+                await self.send(self.initial_message)
+            return
+        if self.is_sse:
+            await self.send(message)
+            return
+        # ── Standard Starlette streaming gzip (same behaviour) ──
+        if message["type"] == "http.response.body" and self.content_encoding_set:
+            if not self.started:
+                self.started = True
+                await self.send(self.initial_message)
+            await self.send(message)
+            return
+        if message["type"] == "http.response.body" and not self.started:
+            self.started = True
+            body = message.get("body", b"")
+            more_body = message.get("more_body", False)
+            if len(body) < self.minimum_size and not more_body:
+                await self.send(self.initial_message)
+                await self.send(message)
+                return
+            if not more_body:
+                # Standard gzip response (ndogo — content-length inajulikana).
+                self.gzip_file.write(body)
+                self.gzip_file.close()
+                body = self.buffer.getvalue()
+                from starlette.datastructures import MutableHeaders
+                headers = MutableHeaders(raw=self.initial_message["headers"])
+                headers["Content-Encoding"] = "gzip"
+                headers["Content-Length"] = str(len(body))
+                headers.add_vary_header("Accept-Encoding")
+                message["body"] = body
+                await self.send(self.initial_message)
+                await self.send(message)
+                return
+            # Streaming gzip (first chunk)
+            from starlette.datastructures import MutableHeaders
+            headers = MutableHeaders(raw=self.initial_message["headers"])
+            headers["Content-Encoding"] = "gzip"
+            headers.add_vary_header("Accept-Encoding")
+            del headers["Content-Length"]
+            self.gzip_file.write(body)
+            message["body"] = self.buffer.getvalue()
+            self.buffer.seek(0)
+            self.buffer.truncate()
+            await self.send(self.initial_message)
+            await self.send(message)
+            return
+        if message["type"] == "http.response.body":
+            # Remaining streaming chunks
+            body = message.get("body", b"")
+            more_body = message.get("more_body", False)
+            self.gzip_file.write(body)
+            if not more_body:
+                self.gzip_file.close()
+            message["body"] = self.buffer.getvalue()
+            self.buffer.seek(0)
+            self.buffer.truncate()
+            await self.send(message)
+
+
+app.add_middleware(_SSEAwareGzipResponder, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
