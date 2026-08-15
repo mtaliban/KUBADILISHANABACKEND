@@ -17,6 +17,8 @@ from paho.mqtt import client as mqtt
 from ..config import settings
 from ..db import get_sync_db
 from ..modules.matches.matching import match_score
+from ..modules.messaging.ws_manager import manager
+from ..services.sms import send_sms, sms_enabled
 from .topics import (
     TOPIC_ALL, TOPIC_USER_REGISTERED, TOPIC_USER_PROFILE_UPDATED,
     TOPIC_USER_DESTINATION_CHANGED, TOPIC_USER_STATION_CHANGED,
@@ -236,6 +238,28 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
         # kamili bila MQTT kwenye browser (browser inasikia kupitia WS token).
         for other in relevant:
             ws_batch.append((dict(payload), other))
+        # SMS YA KWELI kwa simu (kwa wasio ONLINE tu): mtu mpya ameingia — mwambie
+        # anayeingia aone. Wale walio online wameshapata toast papo hapo (bure);
+        # SMS ina gharama ndogo → tu kwa wasio online (hawajui bado).
+        if sms_enabled():
+            try:
+                cadre = payload.get("cadre_code") or ""
+                station = payload.get("current_station") or {}
+                from_where = f"{station.get('district_name', '')} {station.get('region_name', '')}".strip()
+                online_ids = set(manager.online_users())
+                for other in relevant:
+                    if other in online_ids:
+                        continue  # online → toast imewafikia (hakuna SMS inayolipwa)
+                    target = db.users.find_one({"_id": ObjectId(other)}, {"full_name": 1, "phone_primary": 1})
+                    if not target or not target.get("phone_primary"):
+                        continue
+                    msg = (f"Habari {target.get('full_name', '')}! Mwalimu mpya {name} "
+                           f"(Kada: {cadre}){(' kutoka ' + from_where) if from_where else ''} amejiunga na "
+                           f"Kubadilishana Vituo — anataka kuja mkoa wako. "
+                           f"Ingia kwenye mfumo kuona maelezo yake.")
+                    send_sms(target["phone_primary"], msg)
+            except Exception as e:
+                logger.exception(f"SMS fanout failed: {e}")
     elif topic == TOPIC_MATCH_FOUND:
         a_id, b_id = payload.get("user_a_id"), payload.get("user_b_id")
         score = round(float(payload.get("score") or 0) * 100)

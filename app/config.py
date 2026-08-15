@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     mailersend_api_key: str = ""
     mailersend_from: str = "Kubadilishana Vituo <no-reply@kubadilishana.go.tz>"
 
+    # Africa's Talking SMS (https://africastalking.com) — kuwaarifu watumiaji
+    # kwa SMS halisi kwenye simu zao (k.m. user mpya ameingia) hasa wakiwa
+    # OFFLINE. Ikiwa hatuweki api_key → hakuna SMS inatuma (system inaendelea
+    # na notifications za mfumo tu — haivunjiki).
+    at_username: str = ""
+    at_api_key: str = ""
+    at_sender_id: str = ""  # optional: shortcode/alphanumeric Sender ID iliyosajiliwa
+
     class Config:
         env_file = ".env"
         case_sensitive = False
