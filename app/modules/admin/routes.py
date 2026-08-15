@@ -673,15 +673,35 @@ async def revoke_admin(user_id: str, _=Depends(current_admin)):
 
 
 @router.get("/reports")
-async def reports(_=Depends(current_admin), days: int = Query(30)):
-    """Aggregated reports for admin: revenue, users trend, matches trend, top events."""
-    cache_key = f"admin:reports:{days}"
+async def reports(_=Depends(current_admin), days: int = Query(30),
+                 region: str = Query(""), level: str = Query(""), category: str = Query("")):
+    """Aggregated reports for admin: revenue, users trend, matches trend, top events.
+
+    - `region`  (jina la mkoa) — hesabu za watumiaji wa mkoa huo tu.
+    - `level`   (Primary | Secondary) — kada za ngazi hiyo tu.
+    - `category`(health | education) — idara fulani tu.
+    """
+    region = str(region or "").strip()
+    level = str(level or "").strip()
+    category = str(category or "").strip()
+    cache_key = f"admin:reports:{days}:{region}:{level}:{category}"
     cached_res = await _cache_get(cache_key)
     if cached_res is not None:
         return cached_res
     db = get_db()
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
+
+    # ── Filters za kawaida kwenye users ────────────────────────────────
+    def _user_match(extra: dict | None = None) -> dict:
+        m: dict = {"created_at": {"$gte": since}}
+        if region:
+            m["current_station.region_name"] = region
+        if category:
+            m["category"] = category
+        if extra:
+            m.update(extra)
+        return m
 
     # Total revenue (approved donations only) — katika kipindi kilichochaguliwa
     rev_agg = await db.payments.aggregate([
@@ -703,7 +723,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Users per day (registrations)
     users_trend = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}, "n": {"$sum": 1}}},
         {"$sort": {"_id": 1}},
     ]):
@@ -733,7 +753,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # kilichochaguliwa kwenye dropdown).
     users_by_region = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": {"region_id": "$current_station.region_id", "name": "$current_station.region_name"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -742,7 +762,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Users kwa wilaya
     users_by_district = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": {"region": "$current_station.region_name", "district": "$current_station.district_name"},
                      "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
@@ -754,9 +774,14 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     cadre_meta = {}
     async for c in db.cadres.find({}, {"_id": 0, "code": 1, "display_name": 1, "level": 1, "category": 1}):
         cadre_meta[c["code"]] = c
+    # Kada za ngazi (Primary/Secondary) — kwa filter ya level.
+    level_codes = set()
+    if level:
+        level_codes = {c for c, m in cadre_meta.items() if (m.get("level") or "").lower() == level.lower()}
     users_by_cadre = []
+    cadre_match = {"cadre_code": {"$in": list(level_codes)}} if level else None
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match(cadre_match)},
         {"$group": {"_id": {"cat": "$category", "cadre": "$cadre_code"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -773,7 +798,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # Users kwa status
     users_by_status = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": "$status", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}]):
         users_by_status.append({"status": r["_id"] or "unknown", "count": r["n"]})
 
@@ -783,7 +808,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     dept_names = {d["code"]: d["name"] for d in await db.departments.find({}, {"_id": 0, "code": 1, "name": 1}).to_list(200)}
     users_by_category = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": "$category", "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
@@ -795,7 +820,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     # kwenye dashboard ya admin, kwa kila mkoa (na wilaya/kituo ikiwa wamesema).
     incoming_by_region = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$unwind": "$desired_destinations"},
         {"$group": {"_id": {"region_id": "$desired_destinations.region_id",
                              "name": "$desired_destinations.region_name"},
@@ -806,7 +831,7 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
 
     incoming_by_district = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$unwind": "$desired_destinations"},
         {"$group": {"_id": {"region": "$desired_destinations.region_name",
                              "district": "$desired_destinations.district_name"},
@@ -815,10 +840,28 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
     ]):
         incoming_by_district.append({"region": r["_id"]["region"], "district": r["_id"]["district"], "count": r["n"]})
 
+    # ── WANATOKA MIKOA IPI (incoming sources) ── kwa kila mkoa unaohamia,
+    # watu wanaokuja wanatoka mikoa gani. Inachuja kwa destination: ikiwa
+    # `region` imechaguliwa, onyesha sources za mkoa huo; vinginevyo zote.
+    incoming_sources = []
+    source_match = _user_match()
+    if region:
+        source_match["desired_destinations.region_name"] = region
+    async for r in db.users.aggregate([
+        {"$match": source_match},
+        {"$unwind": "$desired_destinations"},
+        {"$group": {"_id": {"to": "$desired_destinations.region_name",
+                             "from": "$current_station.region_name"},
+                     "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+        {"$limit": 300},
+    ]):
+        incoming_sources.append({"to": r["_id"]["to"] or "?", "from": r["_id"]["from"] or "?", "count": r["n"]})
+
     # Users kwa KITUO (facility/school) cha sasa — ngazi ya mwisho ya breakdown.
     users_by_facility = []
     async for r in db.users.aggregate([
-        {"$match": {"created_at": {"$gte": since}}},
+        {"$match": _user_match()},
         {"$group": {"_id": {"facility_id": "$current_station.facility_id",
                              "facility_name": "$current_station.facility_name",
                              "district": "$current_station.district_name",
@@ -843,7 +886,12 @@ async def reports(_=Depends(current_admin), days: int = Query(30)):
         "users_by_category": users_by_category,
         "incoming_by_region": incoming_by_region,
         "incoming_by_district": incoming_by_district,
+        "incoming_sources": incoming_sources,
         "users_by_facility": users_by_facility,
+        # Idadi ya mikoa na wilaya ZOTE zilizopo kwenye system (reference data)
+        # — "Mkoa wa X ipo na wilaya zake hizi zote".
+        "regions_total": await db.regions.count_documents({}),
+        "districts_total": await db.districts.count_documents({}),
     }
     await _cache_set(cache_key, result, 30)
     return result
@@ -1297,7 +1345,7 @@ async def data_facilities_delete(facility_id: str, admin=Depends(current_admin),
 async def reports_export(_=Depends(current_admin), fmt: Literal["pdf", "docx", "csv", "xlsx"] = "pdf"):
     """Ripoti kamili ya NAMBA (users kwa mkoa/wilaya/kada/idara/status +
     michango) kama PDF/Word (kisomi) — au CSV/XLSX kama inahitajika."""
-    data = await reports(days=365)
+    data = await reports(days=365, region="", level="", category="")
     rows: list[list] = []
     rows.append(["RIPOTI — KUBADILISHANA VITUO (NAMBA HALISI)"])
     rows.append(["Siku", str(data["period_days"])])
