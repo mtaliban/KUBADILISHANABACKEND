@@ -13,7 +13,7 @@ Each step publishes an MQTT event for the audit stream and live toasts.
 """
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -37,6 +37,11 @@ def _new_order_id() -> str:
 
 
 def _donation_out(doc: dict) -> dict:
+    now = datetime.now(timezone.utc)
+    exp = doc.get("expires_at")
+    if exp is not None and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    expired = (doc["status"] == "verifying" and exp is not None and exp < now)
     return {
         "order_id": doc["_id"],
         "user_id": doc.get("user_id"),
@@ -47,8 +52,10 @@ def _donation_out(doc: dict) -> dict:
         "sms_text": doc.get("sms_text"),
         "purpose": doc.get("purpose", "donation"),
         "status": doc["status"],
+        "expired": expired,
         "note": doc.get("note"),
         "created_at": doc["created_at"],
+        "expires_at": doc.get("expires_at"),
         "approved_at": doc.get("approved_at"),
         "rejected_at": doc.get("rejected_at"),
     }
@@ -70,6 +77,11 @@ async def submit_donation(body: DonateRequest, user=Depends(current_user)):
     except ValueError as e:
         raise HTTPException(422, f"phone: {e}")
 
+    # Uthibitisho wa malipo una muda: dakika 15 baada ya kuwasilisha,
+    # vinginevyo order inaoneshwa kama "imeisha" kwa mchangiaji (na admin)
+    # na anaweza kuwasilisha upya. (Expiry ni mwongozo wa UI — malipo
+    # yaliyofanyika kwenye simu yanaweza kuthibitishwa na admin bado.)
+    expires_at = now + timedelta(minutes=15)
     doc = {
         "_id": order_id,
         "user_id": str(user["_id"]),
@@ -82,6 +94,7 @@ async def submit_donation(body: DonateRequest, user=Depends(current_user)):
         "status": "verifying",
         "note": None,
         "created_at": now,
+        "expires_at": expires_at,
         "approved_at": None,
         "rejected_at": None,
     }
@@ -125,8 +138,20 @@ async def admin_list_payments(_=Depends(current_admin),
     total_approved = await get_db().payments.aggregate([
         {"$match": {"status": "approved"}}, {"$group": {"_id": None, "s": {"$sum": "$amount"}}}
     ]).to_list(1)
+    # Counts KAMILI za kila status (sio za list iliyochujwa) — dropdown ya
+    # admin inahesabu sahihi kila mara (verifying/approved/rejected) bila
+    # kujali kichujio cha sasa. Real-time: inajirefresh kupitia WS event.
+    counts = {}
+    async for r in get_db().payments.aggregate([
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}}
+    ]):
+        counts[r["_id"]] = r["n"]
     return {"total_approved_tzs": (total_approved[0]["s"] if total_approved else 0),
-            "count": len(payments), "payments": payments}
+            "count": len(payments), "payments": payments,
+            "counts": {"verifying": counts.get("verifying", 0),
+                        "approved": counts.get("approved", 0),
+                        "rejected": counts.get("rejected", 0),
+                        "all": sum(counts.values())}}
 
 
 async def _review(order_id: str, new_status: Literal["approved", "rejected"],

@@ -143,9 +143,70 @@ async def admin_list_announcements(_=Depends(current_admin), limit: int = Query(
         out.append({
             "announcement_id": str(a["_id"]),
             "title": a["title"], "message": a["message"], "audience": a["audience"],
+            "target_user_id": a.get("target_user_id"),
             "recipient_count": a.get("recipient_count", 0),
             "dismissed_count": len(a.get("dismissed_by") or []),
             "created_by_name": a.get("created_by_name"),
             "created_at": a["created_at"], "active": a.get("active", True),
         })
     return {"total": total, "announcements": out}
+
+
+@router.post("/admin/announcements/{announcement_id}/resend", tags=["admin"])
+async def resend_announcement(announcement_id: str, admin=Depends(current_admin)):
+    """Tuma tena tangazo lililotumwa — kwa walengwa WOTE wa sasa (recipients
+    wanahesabiwa upya — watumiaji wapya wanaojiunga wanaingia pia)."""
+    db = get_db()
+    doc = await db.announcements.find_one({"_id": ObjectId(announcement_id)})
+    if not doc:
+        raise HTTPException(404, "Tangazo halipo")
+    body = AnnouncementCreate(
+        title=doc["title"], message=doc["message"],
+        audience=doc.get("audience", "all"),
+        target_user_id=doc.get("target_user_id"),
+    )
+    recipients = await _resolve_recipients(db, body)
+    now = datetime.now(timezone.utc)
+    new_doc = {
+        "title": body.title,
+        "message": body.message,
+        "audience": body.audience,
+        "target_user_id": body.target_user_id,
+        "recipient_ids": recipients,
+        "recipient_count": len(recipients),
+        "created_by": str(admin["_id"]),
+        "created_by_name": admin["full_name"],
+        "created_at": now,
+        "active": True,
+        "dismissed_by": [],
+        "resent_from": announcement_id,
+    }
+    res = await db.announcements.insert_one(new_doc)
+    ann_id = str(res.inserted_id)
+    base = {
+        "event": "announcement.new",
+        "announcement_id": ann_id,
+        "title": new_doc["title"],
+        "message": new_doc["message"],
+        "audience": new_doc["audience"],
+        "created_at": now.isoformat(),
+    }
+    for uid in recipients:
+        publish(f"{TOPIC_ANNOUNCEMENT}/{uid}", {**base, "user_id": uid})
+    return {
+        "announcement_id": ann_id,
+        "sent_to": len(recipients),
+        "audience": body.audience,
+        "created_at": now.isoformat(),
+    }
+
+
+@router.delete("/admin/announcements/{announcement_id}", tags=["admin"])
+async def delete_announcement(announcement_id: str, _=Depends(current_admin)):
+    """Futa tangazo (CRUD) — halionekani tena kwenye orodha ya admin wala
+    kwa watumiaji (dismissed pia)."""
+    db = get_db()
+    r = await db.announcements.delete_one({"_id": ObjectId(announcement_id)})
+    if not r.deleted_count:
+        raise HTTPException(404, "Tangazo halipo")
+    return {"ok": True, "deleted": announcement_id}

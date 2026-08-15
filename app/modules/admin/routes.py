@@ -294,9 +294,14 @@ async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)
 @router.get("/events")
 async def list_events(_=Depends(current_admin), event_type: Optional[str] = None,
                       limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
+    """Events log (table) + STATISTICS za papo hapo: users waliojiunga leo/jana,
+    page views leo/jana, na pages zinazotembelewa zaidi. Real-time: data hii
+    inajirefresh kupitia SSE feed (live-events) — hakuna refresh ya page."""
     cache_key = f"admin:events:{event_type or '-'}:{limit}:{skip}"
     cached_res = await _cache_get(cache_key)
-    if cached_res is not None:
+    if cached_res is not None and not event_type:
+        # Bila kichujio cache inaweza kutumika kwa sekunde chache — kwa kichujio
+        # dropdown inataka FRESH mara moja (bila kuchelewa).
         return cached_res
     db = get_db(); q = {"event_type": event_type} if event_type else {}
     total = await db.event_log.count_documents(q)
@@ -304,7 +309,31 @@ async def list_events(_=Depends(current_admin), event_type: Optional[str] = None
     events = []
     async for e in cur:
         e["_id"] = str(e["_id"]); events.append(e)
-    result = {"total": total, "skip": skip, "limit": limit, "events": events}
+
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yday_start = day_start - timedelta(days=1)
+
+    async def _count(coll, qd):
+        return await db[coll].count_documents(qd)
+
+    users_today = await _count("users", {"created_at": {"$gte": day_start}})
+    users_yesterday = await _count("users", {"created_at": {"$gte": yday_start, "$lt": day_start}})
+    views_today = await _count("page_views", {"visited_at": {"$gte": day_start}})
+    views_yesterday = await _count("page_views", {"visited_at": {"$gte": yday_start, "$lt": day_start}})
+    top_pages = []
+    async for r in db.page_views.aggregate([
+        {"$match": {"visited_at": {"$gte": yday_start}}},
+        {"$group": {"_id": "$path", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+        {"$limit": 8},
+    ]):
+        top_pages.append({"path": r["_id"], "views": r["n"]})
+
+    result = {"total": total, "skip": skip, "limit": limit, "events": events,
+              "stats": {"users_today": users_today, "users_yesterday": users_yesterday,
+                        "views_today": views_today, "views_yesterday": views_yesterday,
+                        "top_pages": top_pages}}
     await _cache_set(cache_key, result, 10)
     return result
 
@@ -1255,9 +1284,9 @@ async def data_facilities_delete(facility_id: str, admin=Depends(current_admin),
 
 
 @router.get("/reports/export")
-async def reports_export(_=Depends(current_admin), fmt: Literal["csv", "xlsx"] = "csv"):
+async def reports_export(_=Depends(current_admin), fmt: Literal["pdf", "docx", "csv", "xlsx"] = "pdf"):
     """Ripoti kamili ya NAMBA (users kwa mkoa/wilaya/kada/idara/status +
-    michango) kama CSV/XLSX — inafunguka kwenye Excel moja kwa moja."""
+    michango) kama PDF/Word (kisomi) — au CSV/XLSX kama inahitajika."""
     data = await reports(days=365)
     rows: list[list] = []
     rows.append(["RIPOTI — KUBADILISHANA VITUO (NAMBA HALISI)"])
@@ -1338,7 +1367,168 @@ def _xlsx_response(rows: list[list], filename: str) -> StreamingResponse:
     )
 
 
+def _pdf_bytes(rows: list[list]) -> bytes:
+    """PDF ya kisomi (reportlab) — header zina rangi, jedwali zina mipaka."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                    Table, TableStyle, HRFlowable)
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm,
+                            topMargin=14*mm, bottomMargin=14*mm,
+                            title="Kubadilishana Vituo — Ripoti")
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("TitleTZ", parent=styles["Title"], fontSize=16,
+                                 textColor=colors.HexColor("#0f4c81"))
+    head_style = ParagraphStyle("HeadTZ", parent=styles["Heading2"], fontSize=11,
+                                textColor=colors.HexColor("#0f4c81"), spaceBefore=10, spaceAfter=4)
+    cell_style = ParagraphStyle("CellTZ", parent=styles["BodyText"], fontSize=8.5, leading=11)
+
+    story = [Paragraph("KUBADILISHANA VITUO", title_style),
+             Paragraph("Ripoti ya Takwimu na Hesabu", styles["Normal"]),
+             HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f4c81")),
+             Spacer(1, 6)]
+    cur_section: str | None = None
+    table_rows: list = []
+
+    def flush_table():
+        nonlocal table_rows, cur_section
+        if not table_rows or cur_section is None:
+            table_rows = []
+            return
+        t = Table(table_rows, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f4c81")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(Paragraph(cur_section, head_style))
+        story.append(t)
+        story.append(Spacer(1, 8))
+        table_rows = []
+        cur_section = None
+
+    for row in rows:
+        if not row:
+            flush_table()
+            continue
+        first = str(row[0])
+        if first.startswith("===") or first.startswith("RIPOTI") or (first.startswith("Siku") and len(row) == 2 and not row[1]):
+            flush_table()
+            cur_section = first.strip("= ")
+            continue
+        if cur_section is not None and len(row) == 1:
+            story.append(Paragraph(f"<b>{row[0]}</b>", styles["Normal"]))
+            continue
+        if cur_section is not None:
+            table_rows.append([Paragraph(str(c), cell_style) for c in row])
+        else:
+            story.append(Paragraph(str(row[0]), styles["Normal"]))
+    flush_table()
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def _pdf_response(rows: list[list], filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([_pdf_bytes(rows)]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _docx_bytes(rows: list[list]) -> bytes:
+    """Word (.docx) ya kisomi — headers za section zina rangi, jedwali zina
+    styles nzuri. Inafunguka kwenye Microsoft Word / Google Docs moja kwa moja."""
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    doc = Document()
+    # Header ya jumla
+    h = doc.add_heading("KUBADILISHANA VITUO", 0)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in h.runs:
+        run.font.color.rgb = RGBColor(0x0F, 0x4C, 0x81)
+    p = doc.add_paragraph("Ripoti ya Takwimu na Hesabu")
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    cur_section: str | None = None
+    table_rows: list = []
+
+    def flush_table():
+        nonlocal table_rows, cur_section
+        if not table_rows or cur_section is None:
+            table_rows = []
+            return
+        doc.add_heading(cur_section, level=2)
+        cols = len(table_rows[0])
+        t = doc.add_table(rows=1, cols=cols)
+        t.style = "Light Grid Accent 1"
+        t.alignment = WD_TABLE_ALIGNMENT.CENTER
+        hdr = t.rows[0].cells
+        for j, c in enumerate(table_rows[0]):
+            hdr[j].text = str(c)
+            for par in hdr[j].paragraphs:
+                for run in par.runs:
+                    run.font.bold = True
+        for i, row in enumerate(table_rows[1:]):
+            cells = t.add_row().cells
+            for j, c in enumerate(row):
+                cells[j].text = str(c)
+        table_rows = []
+
+    for row in rows:
+        if not row:
+            flush_table()
+            continue
+        first = str(row[0])
+        if first.startswith("===") or first.startswith("RIPOTI") or (first.startswith("Siku") and len(row) == 2 and not row[1]):
+            flush_table()
+            cur_section = first.strip("= ")
+            continue
+        if cur_section and len(row) == 1:
+            doc.add_paragraph(first)
+            continue
+        if cur_section:
+            table_rows.append(row)
+        else:
+            doc.add_paragraph(first)
+    flush_table()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _docx_response(rows: list[list], filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([_docx_bytes(rows)]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _export_response(rows: list[list], fmt: str, name: str):
+    if fmt == "pdf":
+        return _pdf_response(rows, f"{name}.pdf")
+    if fmt == "docx":
+        return _docx_response(rows, f"{name}.docx")
     if fmt == "xlsx":
         return _xlsx_response(rows, f"{name}.xlsx")
     return _csv_response(rows, f"{name}.csv")
@@ -1346,9 +1536,9 @@ def _export_response(rows: list[list], fmt: str, name: str):
 
 @router.get("/events/export")
 async def events_export(_=Depends(current_admin),
-                        event_type: Optional[str] = None, fmt: Literal["csv", "xlsx"] = "csv",
+                        event_type: Optional[str] = None, fmt: Literal["pdf", "docx", "csv", "xlsx"] = "pdf",
                         limit: int = Query(5000, le=20000)):
-    """Download all events (filtered by type) as CSV/XLSX — logs za mfumo."""
+    """Download all events (filtered by type) as PDF/Word — logs za mfumo."""
     q = {"event_type": event_type} if event_type else {}
     rows = [["#", "Saa (UTC)", "Aina ya tukio", "Topic", "Aktor (user)", "Data (JSON)"]]
     async for e in get_db().event_log.find(q).sort("occurred_at", -1).limit(limit):
