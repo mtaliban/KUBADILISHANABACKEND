@@ -19,6 +19,7 @@ from .modules.admin.routes import router as admin_router
 from .modules.payments.routes import router as payments_router
 from .modules.notifications.routes import router as notifications_router
 from .modules.announcements.routes import router as announcements_router
+from .modules.feedback.routes import router as feedback_router
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -92,6 +93,7 @@ app.include_router(admin_router)
 app.include_router(payments_router)
 app.include_router(notifications_router)
 app.include_router(announcements_router)
+app.include_router(feedback_router)
 app.include_router(ws_router)  # /ws?token=
 
 

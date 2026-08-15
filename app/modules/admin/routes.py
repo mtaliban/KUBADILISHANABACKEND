@@ -275,6 +275,48 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
     return fresh
 
 
+@router.get("/users/{user_id}/matches")
+async def user_matches(user_id: str, _=Depends(current_admin), limit: int = Query(50, le=200)):
+    """Matches za MTUMIAJI MMOJA — wale anaowaona kwenye dashboard yake.
+    Admin anapoona taarifa za user (View) anaona pia wale wanaokuja kwake:
+    jina, namba, kada, kituo, score. Real-time: matches zinajirefresh kupitia
+    SSE ya admin (data zote za board zinatumia funnel hii hiyo)."""
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(user_id)}, {"full_name": 1, "category": 1, "cadre_code": 1})
+    if not user:
+        raise HTTPException(404, "User haipo")
+    q = {"$or": [{"user_a_id": user_id}, {"user_b_id": user_id}]}
+    cur = db.matches.find(q).sort("matched_at", -1).limit(limit)
+    out = []
+    async for m in cur:
+        other_id = m["user_b_id"] if m["user_a_id"] == user_id else m["user_a_id"]
+        other = await db.users.find_one({"_id": ObjectId(other_id)},
+                                        {"full_name": 1, "phone_primary": 1, "phone_alt": 1,
+                                         "cadre_code": 1, "cadre_display": 1, "category": 1,
+                                         "current_station": 1, "desired_destinations": 1, "online": 1})
+        if not other:
+            continue
+        st = other.get("current_station") or {}
+        dests = (other.get("desired_destinations") or [])
+        out.append({
+            "user_id": other_id,
+            "full_name": other["full_name"],
+            "phone_primary": other.get("phone_primary"),
+            "phone_alt": other.get("phone_alt"),
+            "cadre_code": other.get("cadre_code"),
+            "cadre_display": other.get("cadre_display"),
+            "category": other.get("category"),
+            "online": bool(other.get("online")),
+            "region_name": st.get("region_name"),
+            "district_name": st.get("district_name"),
+            "facility_name": st.get("facility_name"),
+            "destinations": [f"{d.get('district_name') or d.get('region_name')}" for d in dests if d],
+            "score": round(float(m.get("score") or 0) * 100),
+            "matched_at": m.get("matched_at"),
+        })
+    return {"user_id": user_id, "user_name": user["full_name"], "total": len(out), "matches": out}
+
+
 @router.get("/matches")
 async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)):
     db = get_db(); total = await db.matches.count_documents({})
@@ -1342,13 +1384,23 @@ async def data_facilities_delete(facility_id: str, admin=Depends(current_admin),
 
 
 @router.get("/reports/export")
-async def reports_export(_=Depends(current_admin), fmt: Literal["pdf", "docx", "csv", "xlsx"] = "pdf"):
+async def reports_export(_=Depends(current_admin), fmt: Literal["pdf", "docx", "csv", "xlsx"] = "pdf",
+                         days: int = Query(30), region: str = Query(""),
+                         level: str = Query(""), category: str = Query("")):
     """Ripoti kamili ya NAMBA (users kwa mkoa/wilaya/kada/idara/status +
-    michango) kama PDF/Word (kisomi) — au CSV/XLSX kama inahitajika."""
-    data = await reports(days=365, region="", level="", category="")
+    michango) kama PDF/Word (kisomi) — au CSV/XLSX kama inahitajika.
+    Inaheshimu `days` + filters sawa na screen (report ya skrini = PDF/Word)."""
+    days = min(max(int(days), 1), 3650)
+    data = await reports(days=days, region=region, level=level, category=category)
     rows: list[list] = []
     rows.append(["RIPOTI — KUBADILISHANA VITUO (NAMBA HALISI)"])
     rows.append(["Siku", str(data["period_days"])])
+    if region:
+        rows.append(["Mkoa", region])
+    if level:
+        rows.append(["Kiwango", level])
+    if category:
+        rows.append(["Idara", category])
     rows.append([])
     rows.append(["=== WATUMIAJI KWA MKOA ==="])
     rows.append(["Mkoa", "Hesabu"])
