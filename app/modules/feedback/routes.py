@@ -18,14 +18,22 @@ router = APIRouter(prefix="/feedback", tags=["feedback"])
 
 
 def _out(f: dict) -> dict:
+    """Serialize feedback kwa JSON — datetimes lazima ziwe ISO strings,
+    vinginevyo WS send_json inafeli (TypeError: datetime not JSON serializable)
+    na malalamiko hayafiki admin real-time. Hii ndiyo ilikuwa sababu ya
+    "feedback hayafiki papo hapo" — subscriber inafanya isoformat, route
+    haikuwa."""
+    def _iso(v):
+        return v.isoformat() if isinstance(v, datetime) else v
+
     return {
         "id": str(f["_id"]),
         "subject": f.get("subject", ""),
         "message": f.get("message", ""),
         "status": f.get("status", "open"),
         "admin_reply": f.get("admin_reply"),
-        "admin_replied_at": f.get("admin_replied_at"),
-        "created_at": f["created_at"],
+        "admin_replied_at": _iso(f.get("admin_replied_at")),
+        "created_at": _iso(f["created_at"]),
         "user_name": f.get("user_name"),
         "user_phone": f.get("user_phone"),
     }
