@@ -111,6 +111,7 @@ def _candidate_out(u: dict, score: float | None = None) -> dict:
         "user_id": str(u["_id"]),
         "full_name": u["full_name"],
         "phone_primary": u.get("phone_primary"),
+        "phone_alt": u.get("phone_alt"),
         "cadre_display": u.get("cadre_display"),
         "cadre_code": u.get("cadre_code"),
         "category": u.get("category"),
@@ -296,7 +297,8 @@ async def cached_matches(user=Depends(current_user), limit: int = Query(50, le=2
             "score": m["score"], "matched_at": m["matched_at"], "status": m.get("status", "new"),
             "candidate": {
                 "user_id": str(other["_id"]), "full_name": other["full_name"],
-                "phone_primary": other["phone_primary"], "cadre_display": other.get("cadre_display"),
+                "phone_primary": other["phone_primary"], "phone_alt": other.get("phone_alt"),
+                "cadre_display": other.get("cadre_display"),
                 "current_station": other["current_station"],
                 "desired_destinations": other.get("desired_destinations", []),
             },

@@ -67,7 +67,8 @@ async def find_matches_for_user(db, user: dict) -> list[dict]:
                 "user_a_id": str(user["_id"]), "user_b_id": str(c["_id"]), "score": s,
                 "candidate": {
                     "user_id": str(c["_id"]), "full_name": c["full_name"],
-                    "phone_primary": c["phone_primary"], "cadre_display": c.get("cadre_display"),
+                    "phone_primary": c["phone_primary"], "phone_alt": c.get("phone_alt"),
+                    "cadre_display": c.get("cadre_display"),
                     "current_station": c["current_station"],
                     "desired_destinations": c.get("desired_destinations", []),
                 },
