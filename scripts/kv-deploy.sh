@@ -40,13 +40,13 @@ NEW_DIGEST=$(curl -s --max-time 15 "$DOCKER_HUB_API" | python3 -c "
 import json,sys
 try:
     d=json.load(sys.stdin)
-    print(d.get('digest','')[:19])
+    print(d.get('digest',''))
 except Exception:
     print('')
 " 2>/dev/null)
 
 CUR_DIGEST=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.Digest}}' 2>/dev/null \
-  | grep "^mtalibani/kubadilishan:latest " | awk '{print $2}' | cut -c8-26)
+  | grep "^mtalibani/kubadilishan:latest " | awk '{print $2}')
 
 if [ -z "$NEW_DIGEST" ]; then
   log "⚠️  Docker Hub haijibu — imeskipped (jaribu tena baada ya dakika 2)"
