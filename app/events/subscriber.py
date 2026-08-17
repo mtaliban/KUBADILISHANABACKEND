@@ -22,7 +22,7 @@ from ..services.sms import send_sms, sms_enabled
 from .topics import (
     TOPIC_ALL, TOPIC_USER_REGISTERED, TOPIC_USER_PROFILE_UPDATED,
     TOPIC_USER_DESTINATION_CHANGED, TOPIC_USER_STATION_CHANGED,
-    TOPIC_USER_UPDATED_BY_ADMIN,
+    TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED,
     TOPIC_MATCH_FOUND,
     TOPIC_MESSAGE_SENT, TOPIC_CALL_INITIATED,
     TOPIC_PAYMENT_SUBMITTED, TOPIC_PAYMENT_APPROVED, TOPIC_PAYMENT_REJECTED,
@@ -222,6 +222,16 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                 pending.append((uid, ntype, title, body, data or {}))
 
     topic = msg.topic
+    # Reference data (idara/masomo/kada/mikoa/wilaya/vituo) imebadilishwa na
+    # admin → USER-FACING dropdowns (usajili, profile, filters za board)
+    # zijirefresh PAPO HAPO bila refresh ya page. (Admin pages zina SSE yao.)
+    if topic.startswith("kv/data/"):
+        for other in manager.online_users():
+            ws_batch.append(({
+                "event": "data.changed", "kind": payload.get("kind"),
+                "action": payload.get("action"),
+                "occurred_at": payload.get("occurred_at"),
+            }, other))
     if topic == TOPIC_USER_REGISTERED:
         uid = payload.get("user_id")
         u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
@@ -305,9 +315,48 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
         uid = payload.get("user_id")
         u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
         if u:
-            notify(_match_partners(db, uid), "user.profile_updated",
+            partners = _match_partners(db, uid)
+            notify(partners, "user.profile_updated",
                    f"{u['full_name']} amesasisha wasifu wake 👤",
                    "Angalia maelezo mapya kwenye dashboard", {"user_id": uid})
+            # REAL-TIME: board za WOTE walio connected zijirefresh PAPO HAPO
+            # bila refresh ya page — mtumiaji amebadilisha jina/kada/mkoa na
+            # kila mtu anayeona card yake apate data mpya mara moja.
+            for other in manager.online_users():
+                ws_batch.append(({
+                    "event": "user.changed", "user_id": uid,
+                    "occurred_at": payload.get("occurred_at"),
+                }, other))
+    elif topic == TOPIC_USER_UPDATED_BY_ADMIN:
+        # Admin amebadilisha user (jina/kada/station/destinations/status) →
+        # boards za WOTE walio connected zijirefresh papo hapo (mtu huyo
+        # anaonekana na data mpya, au anapotea kama amesitishwa/kufutwa).
+        uid = payload.get("user_id")
+        if uid:
+            for other in manager.online_users():
+                ws_batch.append(({
+                    "event": "user.changed", "user_id": uid,
+                    "occurred_at": payload.get("occurred_at"),
+                }, other))
+    elif topic == TOPIC_USER_DELETED:
+        # User amefutwa (trash) → boards za WOTE zimwondoe PAPO HAPO.
+        uid = payload.get("user_id")
+        if uid:
+            for other in manager.online_users():
+                ws_batch.append(({
+                    "event": "user.removed", "user_id": uid,
+                    "occurred_at": payload.get("occurred_at"),
+                }, other))
+    elif topic in (TOPIC_USER_STATION_CHANGED, TOPIC_USER_DESTINATION_CHANGED):
+        # Mtumiaji amebadilisha mkoa anakoishi / anakoenda → anaweza kuondoka
+        # au kuingia kwenye boards za watu wengine — zote zijirefresh papo hapo.
+        uid = payload.get("user_id")
+        if uid:
+            for other in manager.online_users():
+                ws_batch.append(({
+                    "event": "user.changed", "user_id": uid,
+                    "occurred_at": payload.get("occurred_at"),
+                }, other))
     elif topic.startswith(TOPIC_ANNOUNCEMENT + "/"):
         # Admin tangazo → notification kwa mtu aliyelengwa
         uid = topic.rsplit("/", 1)[1]

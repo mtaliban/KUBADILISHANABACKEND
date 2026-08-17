@@ -30,6 +30,8 @@ from app.events.topics import (
     TOPIC_USER_PASSWORD_RESET_REQUESTED, TOPIC_USER_PASSWORD_RESET_COMPLETED,
     TOPIC_USER_PREFS_UPDATED, TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED,
     TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED, TOPIC_MATCH_FOUND,
+    TOPIC_USER_PROFILE_UPDATED, TOPIC_USER_STATION_CHANGED,
+    TOPIC_DATA_DEPARTMENTS_CHANGED,
 )
 from app.security import create_access_token, hash_password, verify_password
 
@@ -293,3 +295,70 @@ def test_subscriber_recomputes_matches_on_admin_update(monkeypatch):
     assert matches[0]["user_b_id"] == str(candidate["_id"])
     topics = [t for t, _, _ in client.published]
     assert TOPIC_MATCH_FOUND in topics
+
+
+def test_subscriber_broadcasts_user_changed_removed_to_ws(monkeypatch):
+    """Suspend/delete/update by admin must fan out `user.changed`/`user.removed`
+    to EVERY connected user's WebSocket so boards refresh papo hapo (no refresh)."""
+    db = mongomock.MongoClient()["kv_test"]
+    monkeypatch.setattr(sub, "get_sync_db", lambda: db)
+    monkeypatch.setattr(sub, "_append_csv", lambda row: None)
+    monkeypatch.setattr(sub, "_log_event", lambda msg: None)
+    client = _FakeClient()
+    sent: list[tuple[dict, str]] = []
+
+    def fake_push(batch):
+        sent.extend(batch)
+
+    monkeypatch.setattr(sub, "_push_batch_to_users", fake_push)
+    monkeypatch.setattr(sub.manager, "online_users", lambda: ["u1", "u2", "u3"])
+
+    uid1 = str(ObjectId())
+    sub._on_message(client, None, _FakeMsg(TOPIC_USER_UPDATED_BY_ADMIN, {
+        "event": "user.updated_by_admin", "user_id": uid1,
+    }))
+    changed = [p for p, uid in sent if p.get("event") == "user.changed"]
+    assert len(changed) == 3  # kila mtu online anapata user.changed
+    assert all(p["user_id"] == uid1 for p in changed)
+
+    sent.clear()
+    uid2 = str(ObjectId())
+    sub._on_message(client, None, _FakeMsg(TOPIC_USER_DELETED, {
+        "event": "user.deleted", "user_id": uid2,
+    }))
+    removed = [p for p, uid in sent if p.get("event") == "user.removed"]
+    assert len(removed) == 3
+    assert all(p["user_id"] == uid2 for p in removed)
+
+
+def test_subscriber_broadcasts_profile_and_data_changes_to_ws(monkeypatch):
+    """User profile update + reference-data CRUD must reach every connected
+    user's WebSocket so boards/dropdowns update papo hapo (no refresh)."""
+    db = mongomock.MongoClient()["kv_test"]
+    user = _swap_user("+255713000010")
+    db.users.insert_one(user)
+    monkeypatch.setattr(sub, "get_sync_db", lambda: db)
+    monkeypatch.setattr(sub, "_append_csv", lambda row: None)
+    monkeypatch.setattr(sub, "_log_event", lambda msg: None)
+    client = _FakeClient()
+    sent: list[tuple[dict, str]] = []
+
+    def fake_push(batch):
+        sent.extend(batch)
+
+    monkeypatch.setattr(sub, "_push_batch_to_users", fake_push)
+    monkeypatch.setattr(sub.manager, "online_users", lambda: ["u1", "u2"])
+
+    sub._on_message(client, None, _FakeMsg(TOPIC_USER_PROFILE_UPDATED, {
+        "event": "user.profile_updated", "user_id": str(user["_id"]),
+    }))
+    changed = [p for p, uid in sent if p.get("event") == "user.changed"]
+    assert len(changed) == 2
+
+    sent.clear()
+    sub._on_message(client, None, _FakeMsg(TOPIC_DATA_DEPARTMENTS_CHANGED, {
+        "event": "data.department_added", "kind": "department", "action": "added",
+    }))
+    data_evts = [p for p, uid in sent if p.get("event") == "data.changed"]
+    assert len(data_evts) == 2
+    assert data_evts[0]["kind"] == "department"
