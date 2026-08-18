@@ -66,6 +66,7 @@ class LoginResponse(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     phone: str
+    full_name: str = Field(default="", max_length=100)
 
 
 class ResetPasswordRequest(BaseModel):

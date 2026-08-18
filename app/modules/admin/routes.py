@@ -1781,3 +1781,87 @@ async def monitoring(_=Depends(current_admin)):
         },
         "csv_dir": settings.csv_output_dir,
     }
+
+
+# ── Password Reset Requests (admin approve/reject) ──────────────────
+
+@router.get("/password-resets")
+async def list_password_resets(
+    status: str = Query("pending", description="pending|approved|rejected"),
+    admin=Depends(current_admin),
+):
+    """List password reset requests filtered by status."""
+    db = get_db()
+    query = {"status": status} if status else {}
+    cursor = db.password_resets.find(query).sort("created_at", -1).limit(100)
+    items = []
+    async for doc in cursor:
+        # Enrich with user info
+        user = await db.users.find_one({"_id": doc["user_id"]}, {"full_name": 1, "phone_primary": 1, "email": 1}) or {}
+        items.append({
+            "id": str(doc["_id"]),
+            "user_id": str(doc["user_id"]),
+            "full_name": doc.get("full_name") or user.get("full_name", "—"),
+            "phone": doc.get("phone", "—"),
+            "email": user.get("email", ""),
+            "status": doc.get("status", "pending"),
+            "created_at": doc.get("created_at", "").isoformat() if hasattr(doc.get("created_at", ""), "isoformat") else str(doc.get("created_at", "")),
+        })
+    counts = {
+        "pending": await db.password_resets.count_documents({"status": "pending"}),
+        "approved": await db.password_resets.count_documents({"status": "approved"}),
+        "rejected": await db.password_resets.count_documents({"status": "rejected"}),
+    }
+    return {"items": items, "counts": counts}
+
+
+@router.post("/password-resets/{reset_id}/approve")
+async def approve_password_reset(
+    reset_id: str,
+    admin=Depends(current_admin),
+):
+    """Admin approves password reset — marks as approved and logs the code for SMS."""
+    db = get_db()
+    try:
+        oid = ObjectId(reset_id)
+    except Exception:
+        raise HTTPException(400, "ID batili")
+    doc = await db.password_resets.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(404, "Ombi halijapatikana")
+    if doc.get("status") != "pending":
+        raise HTTPException(400, "Ombi tayari limeshachukuliwa")
+    await db.password_resets.update_one({"_id": oid}, {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc), "approved_by": str(admin["_id"])}})
+    publish(TOPIC_USER_PASSWORD_RESET_REQUESTED, {
+        "event": "user.password_reset_approved",
+        "user_id": str(doc["user_id"]),
+        "reset_id": reset_id,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "message": "Ombi limekubaliwa"}
+
+
+@router.post("/password-resets/{reset_id}/reject")
+async def reject_password_reset(
+    reset_id: str,
+    admin=Depends(current_admin),
+):
+    """Admin rejects password reset request."""
+    db = get_db()
+    try:
+        oid = ObjectId(reset_id)
+    except Exception:
+        raise HTTPException(400, "ID batili")
+    doc = await db.password_resets.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(404, "Ombi halijapatikana")
+    if doc.get("status") != "pending":
+        raise HTTPException(400, "Ombi tayari limeshachukuliwa")
+    await db.password_resets.update_one({"_id": oid}, {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc), "rejected_by": str(admin["_id"])}})
+    publish(TOPIC_USER_PASSWORD_RESET_REQUESTED, {
+        "event": "user.password_reset_rejected",
+        "user_id": str(doc["user_id"]),
+        "reset_id": reset_id,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "message": "Ombi limekataliwa"}

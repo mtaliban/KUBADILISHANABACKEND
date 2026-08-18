@@ -221,14 +221,13 @@ async def forgot_password(body: ForgotPasswordRequest):
     # Do NOT reveal whether the account exists
     if user:
         code = f"{secrets.randbelow(1_000_000):06d}"
-        now = datetime.now(timezone.utc)
-        await db.password_resets.update_one(
-            {"user_id": user["_id"]},
-            {"$set": {
+        now = datetime.now(timezone.utc)        await db.password_resets.update_one(
+            {"user_id": user["_id"]}, {"$set": {
                 "user_id": user["_id"], "phone": phone,
+                "full_name": body.full_name or user.get("full_name", ""),
                 "code_hash": hash_password(code),
                 "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
-                "created_at": now, "used": False,
+                "created_at": now, "used": False, "status": "pending",
             }}, upsert=True,
         )
         logger.warning(f"🔑 Password reset code for {phone} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
