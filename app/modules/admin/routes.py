@@ -1838,6 +1838,14 @@ async def approve_password_reset(
         "reset_id": reset_id,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     })
+    # REAL-TIME: push WS event to the user so they know immediately
+    await _push_ws(str(doc["user_id"]), {
+        "event": "user.password_reset_approved",
+        "user_id": str(doc["user_id"]),
+        "reset_id": reset_id,
+        "message": "Ombi lako la kubadilisha password limekubaliwa. Weka password mpya sasa.",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {"ok": True, "message": "Ombi limekubaliwa"}
 
 
@@ -1862,6 +1870,13 @@ async def reject_password_reset(
         "event": "user.password_reset_rejected",
         "user_id": str(doc["user_id"]),
         "reset_id": reset_id,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await _push_ws(str(doc["user_id"]), {
+        "event": "user.password_reset_rejected",
+        "user_id": str(doc["user_id"]),
+        "reset_id": reset_id,
+        "message": "Ombi lako la kubadilisha password limekataliwa.",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     })
     return {"ok": True, "message": "Ombi limekataliwa"}

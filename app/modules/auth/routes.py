@@ -221,7 +221,8 @@ async def forgot_password(body: ForgotPasswordRequest):
     # Do NOT reveal whether the account exists
     if user:
         code = f"{secrets.randbelow(1_000_000):06d}"
-        now = datetime.now(timezone.utc)        await db.password_resets.update_one(
+        now = datetime.now(timezone.utc)
+        await db.password_resets.update_one(
             {"user_id": user["_id"]}, {"$set": {
                 "user_id": user["_id"], "phone": phone,
                 "full_name": body.full_name or user.get("full_name", ""),
@@ -236,7 +237,25 @@ async def forgot_password(body: ForgotPasswordRequest):
             "event": "user.password_reset_requested", "user_id": str(user["_id"]),
             "occurred_at": now.isoformat(),
         })
-    return {"ok": True, "message": f"Kama namba ipo, umepata code kwa SMS. Halali dakika {RESET_CODE_TTL_MINUTES}."}
+    return {"ok": True, "message": f"Ombi la kubadilisha password limetumwa. Subiri admin akubali."}
+
+
+@router.get("/password-reset/status")
+async def password_reset_status(phone: str):
+    """User checks the status of their latest password-reset request.
+    Returns: pending | approved | rejected | none."""
+    try:
+        p = normalize_phone(phone)
+    except ValueError:
+        return {"status": "none"}
+    db = get_db()
+    user = await db.users.find_one({"$or": [{"phone_primary": p}, {"phone_alt": p}]}, {"_id": 1})
+    if not user:
+        return {"status": "none"}
+    rec = await db.password_resets.find_one({"user_id": user["_id"]}, sort=[("created_at", -1)])
+    if not rec:
+        return {"status": "none"}
+    return {"status": rec.get("status", "pending"), "reset_id": str(rec["_id"]) }
 
 
 @router.post("/reset-password")
@@ -248,10 +267,23 @@ async def reset_password(body: ResetPasswordRequest):
     db = get_db()
     user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]})
     if not user:
-        raise HTTPException(400, "Code batili au imekwisha muda")
+        raise HTTPException(400, "Ombi batili au limekwisha muda")
     rec = await db.password_resets.find_one({"user_id": user["_id"], "used": False})
     if not rec:
-        raise HTTPException(400, "Code batili au imekwisha muda")
+        raise HTTPException(400, "Ombi batili au limekwisha muda")
+    # Admin approved — user just sets new password (no code needed)
+    if rec.get("status") == "approved":
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
+        await db.password_resets.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
+        publish(TOPIC_USER_PASSWORD_RESET_COMPLETED, {
+            "event": "user.password_reset_completed", "user_id": str(user["_id"]),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"Password reset (admin-approved) for {phone}")
+        return {"ok": True, "message": "Password imebadilishwa. Ingia sasa."}
+    # Not yet approved — require SMS code
+    if not body.code:
+        raise HTTPException(400, "Ombi bado halijakubaliwa na admin")
     # BSON/PyMongo inarudisha datetimes zisizo na tzinfo (naive UTC) —
     # linganisha kwa utulivu kabla ya kufanya comparison.
     expires = rec["expires_at"]
