@@ -1494,14 +1494,14 @@ def _pdf_bytes(rows: list[list]) -> bytes:
                             title="Kubadilishana Vituo — Ripoti")
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("TitleTZ", parent=styles["Title"], fontSize=16,
-                                 textColor=colors.HexColor("#0f4c81"))
+                                 textColor=colors.black)
     head_style = ParagraphStyle("HeadTZ", parent=styles["Heading2"], fontSize=11,
-                                textColor=colors.HexColor("#0f4c81"), spaceBefore=10, spaceAfter=4)
+                                textColor=colors.black, spaceBefore=10, spaceAfter=4)
     cell_style = ParagraphStyle("CellTZ", parent=styles["BodyText"], fontSize=8.5, leading=11)
 
     story = [Paragraph("KUBADILISHANA VITUO", title_style),
              Paragraph("Ripoti ya Takwimu na Hesabu", styles["Normal"]),
-             HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f4c81")),
+             HRFlowable(width="100%", thickness=1, color=colors.black),
              Spacer(1, 6)]
     cur_section: str | None = None
     table_rows: list = []
@@ -1513,12 +1513,12 @@ def _pdf_bytes(rows: list[list]) -> bytes:
             return
         t = Table(table_rows, repeatRows=1)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f4c81")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9ca3af")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 5),
             ("RIGHTPADDING", (0, 0), (-1, -1), 5),
@@ -1570,11 +1570,11 @@ def _docx_bytes(rows: list[list]) -> bytes:
     from docx.enum.table import WD_TABLE_ALIGNMENT
 
     doc = Document()
-    # Header ya jumla
+    # Header ya jumla — official, bila rangi
     h = doc.add_heading("KUBADILISHANA VITUO", 0)
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in h.runs:
-        run.font.color.rgb = RGBColor(0x0F, 0x4C, 0x81)
+        run.font.color.rgb = RGBColor(0, 0, 0)
     p = doc.add_paragraph("Ripoti ya Takwimu na Hesabu")
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -1589,7 +1589,7 @@ def _docx_bytes(rows: list[list]) -> bytes:
         doc.add_heading(cur_section, level=2)
         cols = len(table_rows[0])
         t = doc.add_table(rows=1, cols=cols)
-        t.style = "Light Grid Accent 1"
+        t.style = "Table Grid"
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
         hdr = t.rows[0].cells
         for j, c in enumerate(table_rows[0]):
