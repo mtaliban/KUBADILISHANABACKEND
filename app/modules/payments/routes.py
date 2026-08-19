@@ -166,12 +166,37 @@ async def _review(order_id: str, new_status: Literal["approved", "rejected"],
     if not r.matched_count:
         raise HTTPException(400, "Donation haiko kwenye status 'verifying' au haipo")
     order = await db.payments.find_one({"_id": order_id})
+    # Kuthibitisha malipo = kumthibitisha mtumiaji: weka is_verified=True
+    # ili aweze kuona namba za simu za wale waliowasiliana nao.
+    if new_status == "approved" and order.get("user_id"):
+        await db.users.update_one(
+            {"_id": order["user_id"]},
+            {"$set": {"is_verified": True, "updated_at": now}},
+        )
     topic = TOPIC_PAYMENT_APPROVED if new_status == "approved" else TOPIC_PAYMENT_REJECTED
     publish(f"{topic}/{order['user_id']}", {
         "event": f"payment.{new_status}", "order_id": order_id,
-        "amount": order["amount"], "currency": order["currency"],
-        "status": new_status, "occurred_at": now.isoformat(),
+        "amount": order["amount"], "currency": order["currency"], "status": new_status, "occurred_at": now.isoformat(),
     })
+    # REAL-TIME: push WS event kwa mtumiaji ili session yake isasishwe
+    # (is_verified = True → aweze kuona namba za simu PAPO HAPO).
+    if new_status == "approved" and order.get("user_id"):
+        from ..messaging.ws_manager import manager
+        import asyncio
+        uid = str(order["user_id"])
+        async def _push():
+            await manager.send_to_user(uid, {
+                "event": "user.verified",
+                "user_id": uid,
+                "message": "Malipo yako yamethibitishwa! Sasa unaweza kuona namba za simu za washirika wako.",
+                "occurred_at": now.isoformat(),
+            })
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_push())
+            loop.close()
+        except Exception as e:
+            logger.exception(f"WS push verified failed: {e}")
     logger.info(f"Donation {order_id} → {new_status} (TZS {order['amount']})")
     return {"ok": True, "order_id": order_id, "status": new_status}
 
