@@ -600,6 +600,10 @@ async def admin_trash_purge_bulk(ids: list[str] = Query(...), _=Depends(current_
         await _purge_user_data(db, uid, oid)
         await db.trash.delete_one({"_id": oid})
         await db.matches.delete_many({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+        publish(TOPIC_USER_DELETED, {
+            "event": "user.deleted", "user_id": uid, "permanent": True,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        })
         purged += 1
     await _bust_admin_caches()
     return {"ok": True, "purged": purged}
