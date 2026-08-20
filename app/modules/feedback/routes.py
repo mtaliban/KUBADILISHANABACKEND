@@ -141,7 +141,7 @@ async def admin_reply(feedback_id: str, body: FeedbackReply, _=Depends(current_a
     await manager.send_to_user(f["user_id"], {
         "event": "notification",
         "type": "feedback.replied",
-        "title": "Jibu la Admin kwenye maoni yako 👑",
+        "title": "Jibu la Admin kwenye maoni yako",
         "body": body.reply.strip()[:120],
         "feedback": _out({**f, "status": "replied", "admin_reply": body.reply.strip(),
                           "admin_replied_at": now}),

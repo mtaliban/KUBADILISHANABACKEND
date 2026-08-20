@@ -236,13 +236,13 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
         uid = payload.get("user_id")
         u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
         name = (u or {}).get("full_name", "Mtumiaji mpya")
-        notify(_admin_user_ids(db), "user.registered", f"{name} amejiunga 🎉",
+        notify(_admin_user_ids(db), "user.registered", f"{name} amejiunga",
                f"Kada: {payload.get('cadre_code')}", {"user_id": uid})
         # Relevant users tu: wale ambao mtu mpya anataka kuja mkoa wao, kutoka
         # mkoa wa chanzo wanaoufuatia (default = mikoa yao ya destination).
         relevant = _relevant_registration_recipients(db, payload)
         notify(relevant, "user.registered",
-               f"{name} amejiunga na jukwaa 🎉",
+               f"{name} amejiunga na jukwaa",
                f"Kada: {payload.get('cadre_code')} — karibu!", {"user_id": uid})
         # Live WS fanout (rich payload) — request feed ya Uber inahitaji data
         # kamili bila MQTT kwenye browser (browser inasikia kupitia WS token).
@@ -276,14 +276,14 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
         a = db.users.find_one({"_id": ObjectId(a_id)}, {"full_name": 1}) if a_id else None
         b = db.users.find_one({"_id": ObjectId(b_id)}, {"full_name": 1}) if b_id else None
         if a_id and b:
-            notify([b_id], "match.found", f"{b['full_name']}, mtu mpya wa kubadilishana nawe 🎯",
+            notify([b_id], "match.found", f"{b['full_name']}, mtu mpya wa kubadilishana nawe ",
                    f"{a['full_name']} — score {score}%", {"user_id": a_id, "score": payload.get("score")})
         if b_id and a:
-            notify([a_id], "match.found", f"{a['full_name']}, mtu mpya wa kubadilishana nawe 🎯",
+            notify([a_id], "match.found", f"{a['full_name']}, mtu mpya wa kubadilishana nawe ",
                    f"{b['full_name']} — score {score}%", {"user_id": b_id, "score": payload.get("score")})
     elif topic.startswith(TOPIC_MESSAGE_SENT + "/"):
         to_id = topic.rsplit("/", 1)[1]
-        notify([to_id], "message.sent", f"Ujumbe kutoka {payload.get('from_full_name', 'mtumiaji')} 💬",
+        notify([to_id], "message.sent", f"Ujumbe kutoka {payload.get('from_full_name', 'mtumiaji')}",
                (payload.get("text") or "")[:120], {"from_user_id": payload.get("from_user_id")})
     elif topic.startswith(TOPIC_CALL_INITIATED + "/"):
         to_id = topic.rsplit("/", 1)[1]
@@ -295,13 +295,13 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                                        {"phone_primary": 1})
         except Exception:
             pass
-        notify([to_id], "call.initiated", f"{payload.get('from_full_name', 'Mtu')} amekupigia 📞",
+        notify([to_id], "call.initiated", f"{payload.get('from_full_name', 'Mtu')} amekupigia ",
                "Angalia simu yako — mpigie tena",
                {"from_user_id": payload.get("from_user_id"),
                 "from_phone": (caller or {}).get("phone_primary")})
     elif topic.startswith(TOPIC_PAYMENT_SUBMITTED + "/"):
         amount = payload.get("amount") or 0
-        notify(_admin_user_ids(db), "payment.submitted", "Mchango mpya unahitaji uthibitisho 💰",
+        notify(_admin_user_ids(db), "payment.submitted", "Mchango mpya unahitaji uthibitisho ",
                f"TZS {amount:,} — angalia SMS na uthibitishe", {"order_id": payload.get("order_id")})
     elif topic.startswith(TOPIC_PAYMENT_APPROVED + "/"):
         uid = topic.rsplit("/", 1)[1]
