@@ -1788,9 +1788,15 @@ async def monitoring(_=Depends(current_admin)):
 @router.get("/password-resets")
 async def list_password_resets(
     status: str = Query("pending", description="pending|approved|rejected"),
+    bypass_cache: bool = Query(False),
     admin=Depends(current_admin),
 ):
     """List password reset requests filtered by status."""
+    cache_key = f"admin:password_resets:{status}"
+    if not bypass_cache:
+        cached = await _cache_get(cache_key)
+        if cached is not None:
+            return cached
     db = get_db()
     query = {"status": status} if status else {}
     cursor = db.password_resets.find(query).sort("created_at", -1).limit(100)
@@ -1812,7 +1818,9 @@ async def list_password_resets(
         "approved": await db.password_resets.count_documents({"status": "approved"}),
         "rejected": await db.password_resets.count_documents({"status": "rejected"}),
     }
-    return {"items": items, "counts": counts}
+    result = {"items": items, "counts": counts}
+    await _cache_set(cache_key, result, 10)
+    return result
 
 
 @router.post("/password-resets/{reset_id}/approve")
@@ -1845,8 +1853,16 @@ async def approve_password_reset(
         "reset_id": reset_id,
         "message": "Ombi lako la kubadilisha password limekubaliwa. Weka password mpya sasa.",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
-    })
+    })    # Bust cache ya password resets — data mpya ionekane papo hapo
+    try:
+        r = get_redis()
+        keys = [k async for k in r.scan_iter("admin:password_resets:*")]
+        if keys:
+            await r.delete(*keys)
+    except Exception:
+        pass
     return {"ok": True, "message": "Ombi limekubaliwa"}
+
 
 
 @router.post("/password-resets/{reset_id}/reject")
@@ -1878,5 +1894,14 @@ async def reject_password_reset(
         "reset_id": reset_id,
         "message": "Ombi lako la kubadilisha password limekataliwa.",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
-    })
+    })    # Bust cache ya password resets
+    try:
+        r = get_redis()
+        keys = [k async for k in r.scan_iter("admin:password_resets:*")]
+        if keys:
+            await r.delete(*keys)
+    except Exception:
+        pass
     return {"ok": True, "message": "Ombi limekataliwa"}
+
+
