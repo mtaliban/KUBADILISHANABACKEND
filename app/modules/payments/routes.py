@@ -24,7 +24,7 @@ from ...events.topics import (
     TOPIC_PAYMENT_SUBMITTED, TOPIC_PAYMENT_APPROVED, TOPIC_PAYMENT_REJECTED,
 )
 from ...security import current_user, current_admin, normalize_phone
-from .schemas import DonateRequest, DonateResponse, AdminReviewRequest
+from .schemas import DonateRequest, DonateResponse, AdminReviewRequest, PaymentMessageRequest, PaymentReplyRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -58,6 +58,7 @@ def _donation_out(doc: dict) -> dict:
         "expires_at": doc.get("expires_at"),
         "approved_at": doc.get("approved_at"),
         "rejected_at": doc.get("rejected_at"),
+        "messages": doc.get("messages", []),
     }
 
 
@@ -211,3 +212,98 @@ async def approve_donation(order_id: str, body: AdminReviewRequest | None = None
 async def reject_donation(order_id: str, body: AdminReviewRequest | None = None,
                           admin=Depends(current_admin)):
     return await _review(order_id, "rejected", body.note if body else None, admin)
+
+
+# ── Payment messages (customer ↔ admin chat — kama feedback) ──
+# Customer anaweza kuuliza kwa nini malipo yake yamekataliwa, na admin
+# anajibu. Messages zimehifadhiwa kwenye payment document (replies array).
+
+@router.post("/{order_id}/message")
+async def customer_message(order_id: str, body: PaymentMessageRequest,
+                           user=Depends(current_user)):
+    """Customer anatuma ujumbe kuhusu malipo yake (k.m. kuuliza kwa nini
+    yamekataliwa). Inapokelewa na admin kupitia SSE/WS."""
+    db = get_db()
+    uid = str(user["_id"])
+    order = await db.payments.find_one({"_id": order_id, "user_id": uid})
+    if not order:
+        raise HTTPException(404, "Malipo hayajapatikana")
+    now = datetime.now(timezone.utc)
+    msg = {
+        "sender": "customer",
+        "sender_name": user["full_name"],
+        "message": body.message.strip(),
+        "created_at": now.isoformat(),
+    }
+    await db.payments.update_one(
+        {"_id": order_id},
+        {"$push": {"messages": msg}},
+    )
+    # Notify admin — malipo yana ujumbe mpya
+    from ..messaging.ws_manager import manager as ws_manager
+    admin_ids = [str(a["_id"]) async for a in db.users.find({"is_admin": True}, {"_id": 1})]
+    for aid in admin_ids:
+        await ws_manager.send_to_user(aid, {
+            "event": "notification",
+            "type": "payment.message",
+            "title": f"Ujumbe kuhusu malipo — {order['order_id']}",
+            "body": body.message.strip()[:120],
+            "data": {"order_id": order_id},
+            "occurred_at": now.isoformat(),
+        })
+    return {"ok": True}
+
+
+@router.post("/admin/{order_id}/reply")
+async def admin_reply(order_id: str, body: PaymentReplyRequest,
+                      admin=Depends(current_admin)):
+    """Admin anajibu mchango kuhusu malipo yake. Jibu linaonekana kwenye
+    donate page ya mtumiaji PAPO HAPO (WS notification)."""
+    db = get_db()
+    order = await db.payments.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(404, "Malipo hayajapatikana")
+    now = datetime.now(timezone.utc)
+    msg = {
+        "sender": "admin",
+        "sender_name": admin.get("full_name", "Admin"),
+        "message": body.reply.strip(),
+        "created_at": now.isoformat(),
+    }
+    await db.payments.update_one(
+        {"_id": order_id},
+        {"$push": {"messages": msg}},
+    )
+    # Notify customer — admin amejibu
+    uid = str(order["user_id"])
+    from ..messaging.ws_manager import manager as ws_manager
+    await ws_manager.send_to_user(uid, {
+        "event": "notification",
+        "type": "payment.reply",
+        "title": "Admin amejibu kuhusu malipo yako",
+        "body": body.reply.strip()[:120],
+        "data": {"order_id": order_id},
+        "occurred_at": now.isoformat(),
+    })
+    publish(f"{TOPIC_PAYMENT_REJECTED}/{uid}", {
+        "event": "payment.reply", "order_id": order_id,
+        "occurred_at": now.isoformat(),
+    })
+    return {"ok": True}
+
+
+@router.get("/{order_id}/messages")
+async def get_messages(order_id: str, user=Depends(current_user)):
+    """Pata messages za malipo haya (customer au admin).
+    Customer anaona tu yake; admin anaona zote."""
+    db = get_db()
+    uid = str(user["_id"])
+    order = await db.payments.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(404, "Malipo hayajapatikana")
+    # Authorization: ni mwenye malipo HAYO au admin
+    is_owner = order.get("user_id") == uid
+    is_admin = (await db.users.find_one({"_id": user["_id"]}, {"is_admin": 1}))
+    if not is_owner and not is_admin:
+        raise HTTPException(403, "Huna ruhusa")
+    return {"messages": order.get("messages", [])}

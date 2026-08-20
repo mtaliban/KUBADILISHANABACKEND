@@ -19,3 +19,11 @@ class DonateResponse(BaseModel):
 
 class AdminReviewRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=300)
+
+
+class PaymentMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+
+
+class PaymentReplyRequest(BaseModel):
+    reply: str = Field(..., min_length=1, max_length=500)
