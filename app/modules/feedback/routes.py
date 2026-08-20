@@ -63,16 +63,28 @@ async def submit_feedback(body: FeedbackCreate, user=Depends(current_user)):
     r = await db.feedback.insert_one(doc)
     fid = str(r.inserted_id)
     # Real-time: admin anajulishwa PAPO HAPO (WS) — maoni mapya yanaonekana
-    # kwenye page ya admin bila refresh. Same funnel kama notifications
-    # (event="notification" + type) — browser inasikia channel notification.
+    # kwenye page ya admin bila refresh. Pia tunahifadhi kwenye DB ili admin
+    # apate badge ya unread hata akiwa offline (kama malipo).
+    from datetime import timezone as _tz
     admins = [str(u["_id"]) async for u in db.users.find({"is_admin": True}, {"_id": 1})]
     out = _out(doc)
+    notif_body = f"{doc.get('subject', '')} — {doc.get('user_name', '')}"
     for aid in admins:
+        notif_doc = {
+            "user_id": aid, "type": "feedback.new",
+            "title": "Maoni mapya ya mtumiaji",
+            "body": notif_body,
+            "data": {"feedback_id": fid},
+            "read": False, "created_at": now,
+        }
+        ins = await db.notifications.insert_one(notif_doc)
         await manager.send_to_user(aid, {
             "event": "notification",
+            "notification_id": str(ins.inserted_id),
             "type": "feedback.new",
-            "title": "Maoni mapya ya mtumiaji 💬",
-            "body": f"{doc.get('subject', '')} — {doc.get('user_name', '')}",
+            "title": "Maoni mapya ya mtumiaji",
+            "body": notif_body,
+            "data": {"feedback_id": fid},
             "feedback": out,
             "occurred_at": now.isoformat(),
         })
@@ -138,11 +150,22 @@ async def admin_reply(feedback_id: str, body: FeedbackReply, _=Depends(current_a
                   "admin_replied_at": now, "replied_at": now}},
     )
     # Real-time kwa mtumiaji: jibu linaonekana PAPO HAPO (bila refresh).
+    # Pia tunahifadhi kwenye DB ili mtumiaji apate badge ya unread.
+    notif_doc = {
+        "user_id": f["user_id"], "type": "feedback.replied",
+        "title": "Jibu la Admin kwenye maoni yako",
+        "body": body.reply.strip()[:120],
+        "data": {"feedback_id": feedback_id},
+        "read": False, "created_at": now,
+    }
+    ins = await db.notifications.insert_one(notif_doc)
     await manager.send_to_user(f["user_id"], {
         "event": "notification",
+        "notification_id": str(ins.inserted_id),
         "type": "feedback.replied",
         "title": "Jibu la Admin kwenye maoni yako",
         "body": body.reply.strip()[:120],
+        "data": {"feedback_id": feedback_id},
         "feedback": _out({**f, "status": "replied", "admin_reply": body.reply.strip(),
                           "admin_replied_at": now}),
         "occurred_at": now.isoformat(),
