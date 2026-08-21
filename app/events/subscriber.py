@@ -310,8 +310,8 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                f"TZS {amount:,} — angalia SMS na uthibitishe", {"order_id": payload.get("order_id")})
     elif topic.startswith(TOPIC_PAYMENT_APPROVED + "/"):
         uid = topic.rsplit("/", 1)[1]
-        notify([uid], "payment.approved", "Mchango wako umekubaliwa ✓",
-               f"TZS {payload.get('amount') or 0:,} — asante!", {"order_id": payload.get("order_id")})
+        notify([uid], "payment.approved", "Malipo yamethibitishwa",
+               f"TZS {payload.get('amount') or 0:,}", {"order_id": payload.get("order_id")})
     elif topic.startswith(TOPIC_PAYMENT_REJECTED + "/"):
         uid = topic.rsplit("/", 1)[1]
         notify([uid], "payment.rejected", "Mchango wako umekataliwa ✗",
