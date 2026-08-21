@@ -15,6 +15,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...config import settings
@@ -171,10 +172,12 @@ async def _review(order_id: str, new_status: Literal["approved", "rejected"],
     # Kuthibitisha malipo = kumthibitisha mtumiaji: weka is_verified=True
     # ili aweze kuona namba za simu za wale waliowasiliana nao.
     if new_status == "approved" and order.get("user_id"):
-        await db.users.update_one(
-            {"_id": order["user_id"]},
+        r = await db.users.update_one(
+            {"_id": ObjectId(order["user_id"])},
             {"$set": {"is_verified": True, "updated_at": now}},
         )
+        if r.matched_count == 0:
+            logger.warning(f"is_verified update matched 0 users for user_id={order['user_id']}")
     topic = TOPIC_PAYMENT_APPROVED if new_status == "approved" else TOPIC_PAYMENT_REJECTED
     publish(f"{topic}/{order['user_id']}", {
         "event": f"payment.{new_status}", "order_id": order_id,
