@@ -232,6 +232,11 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                 "action": payload.get("action"),
                 "occurred_at": payload.get("occurred_at"),
             }, other))
+        # NOTIFICATION kwa admin — data imebadilishwa
+        kind = payload.get("kind") or "data"
+        action = payload.get("action") or "imesasishwa"
+        notify(_admin_user_ids(db), "data.changed", f"Data {kind} {action}",
+               "Angalia kwenye Data Management", {})
     if topic == TOPIC_USER_REGISTERED:
         uid = payload.get("user_id")
         u = db.users.find_one({"_id": ObjectId(uid)}, {"full_name": 1}) if uid else None
