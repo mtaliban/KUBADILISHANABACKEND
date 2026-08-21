@@ -151,18 +151,33 @@ async def login(body: LoginRequest):
             raise HTTPException(403, "Account disabled — wasiliana na admin")
         if not user.get("email_verified"):
             raise HTTPException(403, "Email haijathibitishwa — thibitisha kwanza kupitia 'Thibitisha Email'")
-        # Step 1/2 done: email + password sahihi → email the 6-digit OTP.
-        delivered, code = await _create_and_send_otp(user, "2fa")
+        # Step 1/2 done: email + password sahihi → create OTP + email background.
+        # OTP created INSTANTLY (hash only); email sent in background (fire-and-forget).
+        # Login returns IMMEDIATELY — admin anaingia 2FA page na kusubiri email.
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        now = datetime.now(timezone.utc)
+        await get_db().login_otps.update_one(
+            {"user_id": user["_id"], "purpose": "2fa"},
+            {"$set": {
+                "user_id": user["_id"], "email": user.get("email"), "purpose": "2fa",
+                "code_hash": hash_password(code),
+                "expires_at": now + timedelta(minutes=OTP_TTL_MINUTES),
+                "created_at": now, "used": False, "attempts": 0,
+            }}, upsert=True,
+        )
+        # Email background — usisubiri SMTP (timeout 10-15s)
+        import asyncio
+        async def _send_bg():
+            try:
+                cfg = await get_email_config()
+                await send_email(cfg, user["email"], f"Code yako ya uthibitisho — Kubadilishana Vituo",
+                                 "Code yako ya uthibitisho",
+                                 "Weka code hii hapa chini kwenye mfumo ili ukamilishe kuingia.", code)
+            except Exception as e:
+                logger.exception(f"Background email send failed: {e}")
+        asyncio.create_task(_send_bg())
         resp: dict = {"two_factor_required": True, "email": email,
                       "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}."}
-        if not delivered:
-            # Break-glass (SMTP haijasanidiwa): code inaonekana kwenye response
-            # ili admin asiwe amefungiwa nje. SMTP ikishasanidiwa → code hii
-            # haijitokezi kamwe (inaenda email tu) — usalama unarudi kawaida.
-            resp["dev_code"] = code
-            resp["message"] = (f"Code haiwezi kutumwa kwa email kwa sasa (SMTP haijasanidiwa) — "
-                               f"code iko kwenye skrini. Halali dakika {OTP_TTL_MINUTES}. "
-                               "Baada ya kuingia, weka email kwenye Mipangilio.")
         return resp
 
     # ── Phone → regular user login (primary OR alt) ──
