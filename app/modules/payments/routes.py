@@ -106,20 +106,7 @@ async def submit_donation(body: DonateRequest, user=Depends(current_user)):
         "amount": body.amount, "currency": settings.payment_currency,
         "status": "verifying", "occurred_at": now.isoformat(),
     })
-    # DIRECT WS push kwa admin — wapate notification PAPO HAPO (si tu MQTT)
-    try:
-        from ..messaging.ws_manager import manager
-        admin_docs = await db.users.find({"is_admin": True}, {"_id": 1}).to_list(10)
-        for adm in admin_docs:
-            await manager.send_to_user(str(adm["_id"]), {
-                "event": "notification", "type": "payment.submitted",
-                "title": "Mchango mpya unahitaji uthibitisho",
-                "body": f"TZS {body.amount:,} — angalia SMS na uthibitishe",
-                "data": {"order_id": order_id},
-                "occurred_at": now.isoformat(),
-            })
-    except Exception as e:
-        logger.exception(f"WS push to admin failed: {e}")
+    # MQTT subscriber ndio hutuma notification kwa admin (si direct WS — duplicate)
     logger.info(f"Donation {order_id} submitted by {doc['user_id']} — awaiting verification")
     return DonateResponse(
         order_id=order_id, status="verifying", amount=body.amount,
@@ -193,32 +180,20 @@ async def _review(order_id: str, new_status: Literal["approved", "rejected"],
         "event": f"payment.{new_status}", "order_id": order_id,
         "amount": order["amount"], "currency": order["currency"], "status": new_status, "occurred_at": now.isoformat(),
     })
-    # ── DIRECT WS pushes kwa mtumiaji (pamoja na MQTT subscriber) ──
-    # Tumia await moja kwa moja — tuko kwenye async context ya FastAPI.
-    # asyncio.new_event_loop() haifanyi kazi hapa.
+    # DIRECT WS push kwa mtumiaji — session inasasishwa papo hapo
+    # (MQTT subscriber tayari huteremsha notification — usitume duplicate)
     from ..messaging.ws_manager import manager
     uid = str(order["user_id"])
-    try:
-        # 1) user.verified — session inasasishwa (is_verified=True) → aweze kuona namba
-        if new_status == "approved":
+    if new_status == "approved":
+        try:
             await manager.send_to_user(uid, {
                 "event": "user.verified",
                 "user_id": uid,
                 "message": "Malipo yako yamethibitishwa!",
                 "occurred_at": now.isoformat(),
             })
-        # 2) notification — toast + badge kwenye donate page
-        ntype = f"payment.{new_status}"
-        ntitle = "Mchango wako umekubaliwa ✓" if new_status == "approved" else "Mchango wako umekataliwa ✗"
-        nbody = f"TZS {order['amount']:,} — asante!" if new_status == "approved" else (note or "Wasiliana na admin kwa maelezo")[:120]
-        await manager.send_to_user(uid, {
-            "event": "notification", "type": ntype,
-            "title": ntitle, "body": nbody,
-            "data": {"order_id": order_id},
-            "occurred_at": now.isoformat(),
-        })
-    except Exception as e:
-        logger.exception(f"WS push (verified/notification) failed: {e}")
+        except Exception as e:
+            logger.exception(f"WS push verified failed: {e}")
     logger.info(f"Donation {order_id} → {new_status} (TZS {order['amount']})")
     return {"ok": True, "order_id": order_id, "status": new_status}
 
