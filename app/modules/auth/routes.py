@@ -237,6 +237,26 @@ async def forgot_password(body: ForgotPasswordRequest):
             "event": "user.password_reset_requested", "user_id": str(user["_id"]),
             "occurred_at": now.isoformat(),
         })
+        # REAL-TIME: notify admins via WS — ombi la password reset
+        from ..messaging.ws_manager import manager as ws_manager
+        notif_body = f"{user.get('full_name', '')} — {phone}"
+        admins = [str(a["_id"]) async for a in db.users.find({"is_admin": True}, {"_id": 1})]
+        for aid in admins:
+            ins = await db.notifications.insert_one({
+                "user_id": aid, "type": "password_reset.new",
+                "title": "Ombi la password reset",
+                "body": notif_body,
+                "data": {"user_id": str(user["_id"])},
+                "read": False, "created_at": now,
+            })
+            await ws_manager.send_to_user(aid, {
+                "event": "notification",
+                "type": "password_reset.new",
+                "title": "Ombi la password reset",
+                "body": notif_body,
+                "data": {"user_id": str(user["_id"])},
+                "occurred_at": now.isoformat(),
+            })
     return {"ok": True, "message": f"Ombi la kubadilisha password limetumwa. Subiri admin akubali."}
 
 
