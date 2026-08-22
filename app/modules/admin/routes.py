@@ -1098,8 +1098,9 @@ async def data_subjects(_=Depends(current_admin), level: Optional[str] = None):
 @router.post("/data/subjects")
 async def data_subjects_add(body: SubjectIn, admin=Depends(current_admin)):
     db = get_db()
-    if await db.subjects.find_one({"code": body.code}):
-        raise HTTPException(409, f"Somo '{body.code}' tayari lipo")
+    existing = await db.subjects.find_one({"code": body.code, "level": body.level})
+    if existing:
+        raise HTTPException(409, f"Somo '{body.code}' (ngazi {body.level}) tayari lipo")
     data = body.model_dump()
     await db.subjects.insert_one(dict(data))  # copy — insert inaongeza _id kwenye dict
     await _bust_location_caches()
