@@ -145,8 +145,10 @@ async def stats(_=Depends(current_admin)):
 async def list_users(_=Depends(current_admin),
                      category: Optional[str] = None,
                      cadre_code: Optional[str] = None, region_id: Optional[int] = None,
+                     district_id: Optional[int] = None, facility_id: Optional[str] = None,
+                     subject: Optional[str] = None,
                      q: Optional[str] = None, limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
-    cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{q or '-'}:{limit}:{skip}"
+    cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{district_id or '-'}:{facility_id or '-'}:{subject or '-'}:{q or '-'}:{limit}:{skip}"
     cached_res = await _cache_get(cache_key)
     if cached_res is not None:
         return cached_res
@@ -154,12 +156,15 @@ async def list_users(_=Depends(current_admin),
     if category: qd["category"] = category
     if cadre_code: qd["cadre_code"] = cadre_code
     if region_id: qd["current_station.region_id"] = region_id
+    if district_id: qd["current_station.district_id"] = district_id
+    if facility_id: qd["current_station.facility_id"] = facility_id
+    if subject: qd["subjects"] = subject
     if q: qd["$or"] = [{"full_name": {"$regex": _escape_regex(q), "$options": "i"}}, {"phone_primary": {"$regex": _escape_regex(q)}}]
     total = await db.users.count_documents(qd)
     cur = db.users.find(qd, {"password_hash": 0}).sort("created_at", -1).skip(skip).limit(limit)
     users = []
     async for u in cur:
-        u["_id"] = str(u["_id"]); users.append(u)
+        u["_id"] = str(u["_id"]); u["has_password"] = bool(u.get("password_hash")); users.append(u)
     result = {"total": total, "skip": skip, "limit": limit, "users": users}
     await _cache_set(cache_key, result, 10)
     return result
