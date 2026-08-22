@@ -36,8 +36,16 @@ async def list_notifications(user=Depends(current_user), limit: int = Query(50, 
 
 @router.get("/unread-count")
 async def unread_count(user=Depends(current_user)):
-    n = await get_db().notifications.count_documents({"user_id": str(user["_id"]), "read": False})
-    return {"unread": n}
+    # Fast Redis check: ikiwa count ni 0 na zilizopita zilisomwa, weka cache
+    # ndogo ili kila poll isigonge MongoDB (notifications ni nyingi na kila
+    # page inapoll mara kwa mara).
+    from ...cache import cached
+    uid = str(user["_id"])
+    async def _load():
+        n = await get_db().notifications.count_documents({"user_id": uid, "read": False})
+        return {"unread": n}
+    # Cache 5s — notification mpya inapokuja, subscriber inabust cache
+    return await cached(f"notif:unread:{uid}", _load, ttl=5)
 
 
 @router.post("/read-all")

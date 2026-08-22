@@ -1034,9 +1034,15 @@ async def _ensure_default_departments(db) -> None:
 
 @router.get("/data/departments")
 async def data_departments(_=Depends(current_admin)):
+    cache_key = "admin:data:departments"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     db = get_db()
     await _ensure_default_departments(db)
-    return [d async for d in db.departments.find({}, {"_id": 0}).sort("name", 1)]
+    result = [d async for d in db.departments.find({}, {"_id": 0}).sort("name", 1)]
+    await _cache_set(cache_key, result, 300)
+    return result
 
 
 @router.post("/data/departments")
@@ -1091,8 +1097,14 @@ async def data_departments_delete(code: str, admin=Depends(current_admin)):
 
 @router.get("/data/subjects")
 async def data_subjects(_=Depends(current_admin), level: Optional[str] = None):
+    cache_key = f"admin:data:subjects:{level or 'all'}"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     q = {"level": level} if level else {}
-    return [d async for d in get_db().subjects.find(q, {"_id": 0}).sort("name", 1)]
+    result = [d async for d in get_db().subjects.find(q, {"_id": 0}).sort("name", 1)]
+    await _cache_set(cache_key, result, 300)
+    return result
 
 
 @router.post("/data/subjects")
@@ -1130,8 +1142,14 @@ async def data_subjects_delete(code: str, admin=Depends(current_admin)):
 
 @router.get("/data/cadres")
 async def data_cadres(_=Depends(current_admin), category: Optional[str] = None):
+    cache_key = f"admin:data:cadres:{category or 'all'}"
+    cached_res = await _cache_get(cache_key)
+    if cached_res is not None:
+        return cached_res
     q = {"category": category} if category else {}
-    return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
+    result = [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
+    await _cache_set(cache_key, result, 300)
+    return result
 
 
 @router.post("/data/cadres")

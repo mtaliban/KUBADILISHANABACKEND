@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ...db import get_db
+from ...cache import cached
 from ...security import current_user, current_admin
 from ...events.publisher import publish
 from ...events.topics import TOPIC_ANNOUNCEMENT
@@ -90,24 +91,26 @@ async def send_announcement(body: AnnouncementCreate, admin=Depends(current_admi
 async def active_announcements(user=Depends(current_user), limit: int = Query(20, le=100)):
     """Tangazo zinazolenga mimi, ambazo sija-dismiss (cancel)."""
     db = get_db(); uid = str(user["_id"])
-    cur = db.announcements.find(
-        {"active": True, "recipient_ids": uid, "dismissed_by": {"$ne": uid}},
-        {"title": 1, "message": 1, "audience": 1, "created_by_name": 1, "created_at": 1,
-         "recipient_count": 1, "dismissed_by": 1},
-    ).sort("created_at", -1).limit(limit)
-    out = []
-    async for a in cur:
-        out.append({
-            "announcement_id": str(a["_id"]),
-            "title": a["title"],
-            "message": a["message"],
-            "audience": a["audience"],
-            "created_by_name": a.get("created_by_name"),
-            "created_at": a["created_at"],
-            "recipient_count": a.get("recipient_count", 0),
-            "dismissed": uid in (a.get("dismissed_by") or []),
-        })
-    return {"count": len(out), "announcements": out}
+    async def _load():
+        cur = db.announcements.find(
+            {"active": True, "recipient_ids": uid, "dismissed_by": {"$ne": uid}},
+            {"title": 1, "message": 1, "audience": 1, "created_by_name": 1, "created_at": 1,
+             "recipient_count": 1, "dismissed_by": 1},
+        ).sort("created_at", -1).limit(limit)
+        out = []
+        async for a in cur:
+            out.append({
+                "announcement_id": str(a["_id"]),
+                "title": a["title"],
+                "message": a["message"],
+                "audience": a["audience"],
+                "created_by_name": a.get("created_by_name"),
+                "created_at": a["created_at"],
+                "recipient_count": a.get("recipient_count", 0),
+                "dismissed": uid in (a.get("dismissed_by") or []),
+            })
+        return {"count": len(out), "announcements": out}
+    return await cached(f"announcements:active:{uid}", _load, ttl=60)
 
 
 @router.get("/announcements/unread-count")

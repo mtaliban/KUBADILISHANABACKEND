@@ -16,6 +16,7 @@ from bson import ObjectId
 from paho.mqtt import client as mqtt
 from ..config import settings
 from ..db import get_sync_db
+from ..cache import get_redis
 from ..modules.matches.matching import match_score
 from ..modules.messaging.ws_manager import manager
 from ..services.sms import send_sms, sms_enabled
@@ -437,6 +438,35 @@ def _on_connect(client, userdata, flags, rc, props):
     client.subscribe(TOPIC_ALL, qos=1)
 
 
+def _bust_data_caches() -> None:
+    """Futa Redis cache za reference data (departments/subjects/cadres/locations)
+    pale data inapobadilishwa — vinginevyo dropdown zote za frontend zinaonyesha
+    data ya zamani hadi cache itakapoisha (300s default)."""
+    try:
+        r = get_redis()
+        import asyncio
+        async def _bust():
+            keys = []
+            for prefix in ("admin:data:*", "admin:stats", "admin:users:*", "admin:events:*",
+                           "admin:reports:*", "locations:*", "cadres:*", "subjects:*",
+                           "announcements:*", "notif:unread:*"):
+                keys += [k async for k in r.scan_iter(prefix)]
+            if keys:
+                await r.delete(*keys)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_bust())
+            else:
+                loop.run_until_complete(_bust())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_bust())
+            loop.close()
+    except Exception as e:
+        logger.debug(f"cache bust failed (non-critical): {e}")
+
+
 def _on_message(client, userdata, msg):
     # 1) always log
     try:
@@ -455,6 +485,12 @@ def _on_message(client, userdata, msg):
                 _recompute_matches(uid, client)
         except Exception as e:
             logger.exception(f"match trigger failed: {e}")
+    # Bust admin caches pale mtumiaji mpya anapojiunga (stats, users list)
+    if msg.topic in (TOPIC_USER_REGISTERED, TOPIC_USER_DELETED, TOPIC_USER_UPDATED_BY_ADMIN):
+        try:
+            _bust_data_caches()
+        except Exception:
+            pass
 
     # 3) turn events into user-facing notifications
     try:
@@ -469,6 +505,14 @@ def _on_message(client, userdata, msg):
             _fanout_match_to_ws(payload)
         except Exception as e:
             logger.exception(f"WS fanout failed: {e}")
+
+    # 5) cache invalidation — data changed (departments/subjects/cadres/regions/districts)
+    #    BUST caches ili frontend zote zipate data mpya papo hapo bila refresh.
+    if msg.topic.startswith("kv/data/"):
+        try:
+            _bust_data_caches()
+        except Exception as e:
+            logger.debug(f"data cache bust failed: {e}")
 
 
 def start_subscriber() -> mqtt.Client:

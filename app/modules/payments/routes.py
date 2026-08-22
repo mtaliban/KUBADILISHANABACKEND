@@ -66,7 +66,11 @@ def _donation_out(doc: dict) -> dict:
 @router.get("/info")
 async def donation_info(_=Depends(current_user)):
     """Admin's mobile-money number that donors pay into (any network)."""
-    return {"phone": settings.donation_phone, "currency": settings.payment_currency}
+    # Static config — tunacache kwa muda mrefu (cache inabaki mpaka restart)
+    from ...cache import cached
+    async def _load():
+        return {"phone": settings.donation_phone, "currency": settings.payment_currency}
+    return await cached("payments:info", _load, ttl=3600)
 
 
 @router.post("/donate", response_model=DonateResponse)
