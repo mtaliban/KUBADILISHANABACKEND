@@ -1910,3 +1910,49 @@ async def reject_password_reset(
     return {"ok": True, "message": "Ombi limekataliwa"}
 
 
+# ─── Contact Permission Settings ───────────────────────────────────────────
+# Global: require_payment_for_contact (admin anaweza kuzima kwa wote)
+# Per-user: contact_enabled (admin anaweza kumruhusu mtu binafsi)
+
+class ContactSettings(BaseModel):
+    require_payment: bool
+
+
+@router.get("/settings/contact")
+async def get_contact_settings(admin=Depends(current_admin)):
+    db = get_db()
+    doc = await db.settings.find_one({"key": "contact"})
+    return {
+        "require_payment": bool(doc.get("require_payment", True)) if doc else True,
+    }
+
+
+@router.put("/settings/contact")
+async def update_contact_settings(body: ContactSettings, admin=Depends(current_admin)):
+    db = get_db()
+    await db.settings.update_one(
+        {"key": "contact"},
+        {"$set": {"require_payment": body.require_payment, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True, "require_payment": body.require_payment}
+
+
+@router.patch("/users/{user_id}/contact-toggle")
+async def toggle_user_contact(user_id: str, admin=Depends(current_admin)):
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(404, "Mtumiaji hapo")
+    new_val = not user.get("contact_enabled", False)
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"contact_enabled": new_val, "updated_at": datetime.now(timezone.utc)}},
+    )
+    # WS push — mtumiaji apate mabadiliko papo hapo
+    await _push_ws(user_id, {
+        "event": "contact.toggled",
+        "contact_enabled": new_val,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "contact_enabled": new_val}

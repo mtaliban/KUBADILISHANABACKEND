@@ -199,6 +199,10 @@ async def login(body: LoginRequest):
 
 @router.get("/me")
 async def me(user=Depends(current_user)):
+    db = get_db()
+    # Global setting: require_payment_for_contact
+    contact_doc = await db.settings.find_one({"key": "contact"})
+    require_payment = bool(contact_doc.get("require_payment", True)) if contact_doc else True
     return {
         "user_id": str(user["_id"]),
         "full_name": user["full_name"],
@@ -215,6 +219,8 @@ async def me(user=Depends(current_user)):
         "status": user.get("status", "active"),
         "is_verified": user.get("is_verified", False),
         "is_admin": user.get("is_admin", False),
+        "contact_enabled": user.get("contact_enabled", False),
+        "require_payment_for_contact": require_payment,
     }
 
 
