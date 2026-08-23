@@ -169,36 +169,36 @@ HEALTH_POSTS = [
 ]
 
 EDU_POSTS = [
-    # (id, cadre, current_region, subjects, desired_regions, phone)
-    (100, "TEACHER_PRIMARY", "Mara", [], ["Katavi"], "0743738258"),  # Bunda=Mara
-    (101, "TEACHER_PRIMARY", "Coast", ["ENG", "KISW"], ["Dar Es Salaam"], "0656140039"),  # Kibaha=Coast
-    (102, "TEACHER_SECONDARY", "Mbeya", ["GEO", "HIST"], ["Shinyanga", "Dodoma", "Mwanza"], "0794691825"),
-    (103, "TEACHER_PRIMARY", "Lindi", [], ["Coast", "Dar Es Salaam", "Morogoro", "Mbeya", "Njombe"], "0624718702"),
-    (104, "TEACHER_SECONDARY", "Ruvuma", ["GEO", "SPORTS"], ["Dodoma", "Singida", "Morogoro"], "0716065564"),
-    (105, "TEACHER_SECONDARY", "Arusha", ["PHYS", "MATH"], ["Mwanza"], "0752751065"),
-    (106, "TEACHER_SECONDARY", "Mwanza", ["CHEM", "BIO"], ["Dar Es Salaam", "Coast"], "0678322906"),
-    (107, "TEACHER_PRIMARY", "Ruvuma", [], ["Coast"], "0653580860"),  # Nyasa=Ruvuma
-    (108, "TEACHER_PRIMARY", "Mara", [], ["Tanga", "Arusha", "Kilimanjaro", "Coast", "Dar Es Salaam", "Morogoro"], "0788375535"),
-    (109, "TEACHER_PRIMARY", "Kigoma", [], ["Shinyanga", "Mwanza", "Simiyu"], "0627362558"),  # Kibondo=Kigoma
-    (110, "TEACHER_SECONDARY", "Tanga", ["HIST", "ENG"], ["Katavi"], "0688573707"),  # Lushoto=Tanga
-    (111, "TEACHER_SECONDARY", "Kilimanjaro", ["PHYS", "MATH"], ["Mtwara"], "0779002783"),
-    (112, "TEACHER_SECONDARY", "Mwanza", ["MATH"], ["Katavi", "Rukwa"], "0764302179"),
-    (113, "TEACHER_SECONDARY", "Kagera", ["ENG", "KISW"], ["Singida", "Manyara", "Arusha", "Dodoma"], "0620494407"),  # Karagwe=Kagera
-    (114, "TEACHER_PRIMARY", "Singida", [], ["Rukwa", "Songwe", "Katavi"], "0617333513"),
-    (115, "TEACHER_SECONDARY", "Ruvuma", ["MATH", "IT"], ["Morogoro", "Iringa", "Dodoma"], "0717495860"),  # Nyasa=Ruvuma
-    (116, "TEACHER_PRIMARY", "Rukwa", [], ["Morogoro", "Singida", "Manyara", "Arusha", "Tanga", "Kilimanjaro"], "0703451764"),
-    (117, "TEACHER_SECONDARY", "Mwanza", ["HIST", "KISW"], ["Mbeya"], "0745587187"),  # Magu=Mwanza
-    (118, "TEACHER_SECONDARY", "Mtwara", ["BIO", "GEO"], ["Mbeya", "Iringa"], "0621307026"),
-    (119, "TEACHER_PRIMARY", "Kilimanjaro", [], ["Coast", "Dar Es Salaam"], "0743553807"),  # Hai=Kilimanjaro
-    (120, "TEACHER_SECONDARY", "Mbeya", ["KISW", "ENG", "MATH"], ["Geita", "Mwanza"], "0684740349"),
-    (121, "TEACHER_SECONDARY", "Coast", ["ENG", "KISW"], ["Morogoro", "Geita"], "0770994640"),  # Mkuranga=Coast
-    (122, "TEACHER_PRIMARY", "Ruvuma", [], ["Mwanza"], "0680692859"),  # Nyasa=Ruvuma
-    (123, "TEACHER_PRIMARY", "Shinyanga", [], ["Singida", "Kilimanjaro"], "0744207516"),
-    (124, "TEACHER_SECONDARY", "Kilimanjaro", ["MATH", "PHYS"], ["Geita", "Mwanza", "Shinyanga", "Simiyu"], "0758891272"),
-    (125, "TEACHER_PRIMARY", "Dodoma", [], ["Morogoro"], "0614074118"),  # Kondoa=Dodoma
-    (126, "TEACHER_PRIMARY", "Shinyanga", [], ["Mwanza", "Tanga", "Dar Es Salaam"], "0627606099"),  # Msalala=Shinyanga, Handeni=Tanga, Ubungo=Dar
-    (127, "TEACHER_SECONDARY", "Tabora", ["BIO", "CHEM"], ["Iringa"], "0775749633"),  # Nzega TC=Tabora, Mafinga=Iringa
-    (128, "TEACHER_PRIMARY", "Mtwara", [], ["Ruvuma"], "0733049402"),  # Masasi=Mtwara, Songea MC=Ruvuma
+    # (id, cadre, current_region, subjects, desired_regions, phone, full_name)
+    (100, "TEACHER_PRIMARY", "Mara", [], ["Katavi"], "0743738258", "Juma Mwakipoyo"),
+    (101, "TEACHER_SECONDARY", "Coast", ["ENG", "KISW"], ["Dar Es Salaam"], "0656140039", "Amina Hassan"),
+    (102, "TEACHER_SECONDARY", "Mbeya", ["GEO", "HIST"], ["Shinyanga", "Dodoma", "Mwanza"], "0794691825", "Peter Mwangola"),
+    (103, "TEACHER_PRIMARY", "Lindi", [], ["Coast", "Dar Es Salaam", "Morogoro", "Mbeya", "Njombe"], "0624718702", "Grace Kimaro"),
+    (104, "TEACHER_SECONDARY", "Ruvuma", ["GEO", "SPORTS"], ["Dodoma", "Singida", "Morogoro"], "0716065564", "John Mwamba"),
+    (105, "TEACHER_SECONDARY", "Arusha", ["PHYS", "MATH"], ["Mwanza"], "0752751065", "Salome Mushi"),
+    (106, "TEACHER_SECONDARY", "Mwanza", ["CHEM", "BIO"], ["Dar Es Salaam", "Coast"], "0678322906", "Joseph Kimaro"),
+    (107, "TEACHER_PRIMARY", "Ruvuma", [], ["Coast"], "0653580860", "Fatuma Omar"),
+    (108, "TEACHER_PRIMARY", "Mara", [], ["Tanga", "Arusha", "Kilimanjaro", "Coast", "Dar Es Salaam", "Morogoro"], "0788375535", "Deus Mwasonge"),
+    (109, "TEACHER_PRIMARY", "Kigoma", [], ["Shinyanga", "Mwanza", "Simiyu"], "0627362558", "Mary Kajuna"),
+    (110, "TEACHER_SECONDARY", "Tanga", ["HIST", "ENG"], ["Katavi"], "0688573707", "Anwar Mkwizu"),
+    (111, "TEACHER_SECONDARY", "Kilimanjaro", ["PHYS", "MATH"], ["Mtwara"], "0779002783", "Emmanuel Mushi"),
+    (112, "TEACHER_SECONDARY", "Mwanza", ["MATH"], ["Katavi", "Rukwa"], "0764302179", "Neema Mwale"),
+    (113, "TEACHER_SECONDARY", "Kagera", ["ENG", "KISW"], ["Singida", "Manyara", "Arusha", "Dodoma"], "0620494407", "Robert Mwamba"),
+    (114, "TEACHER_PRIMARY", "Singida", [], ["Rukwa", "Songwe", "Katavi"], "0617333513", "Zainabu Mkwawa"),
+    (115, "TEACHER_SECONDARY", "Ruvuma", ["MATH", "IT"], ["Morogoro", "Iringa", "Dodoma"], "0717495860", "Patrick Mwasilile"),
+    (116, "TEACHER_PRIMARY", "Rukwa", [], ["Morogoro", "Singida", "Manyara", "Arusha", "Tanga", "Kilimanjaro"], "0703451764", "Augustino Nguvumali"),
+    (117, "TEACHER_SECONDARY", "Mwanza", ["HIST", "KISW"], ["Mbeya"], "0745587187", "Hadija Mwanukuzi"),
+    (118, "TEACHER_SECONDARY", "Mtwara", ["BIO", "GEO"], ["Mbeya", "Iringa"], "0621307026", "Bernard Mwingira"),
+    (119, "TEACHER_PRIMARY", "Kilimanjaro", [], ["Coast", "Dar Es Salaam"], "0743553807", "Mwanahamisi Mrisho"),
+    (120, "TEACHER_SECONDARY", "Mbeya", ["KISW", "ENG", "MATH"], ["Geita", "Mwanza"], "0684740349", "Charles Mwamba"),
+    (121, "TEACHER_SECONDARY", "Coast", ["ENG", "KISW"], ["Morogoro", "Geita"], "0770994640", "Amina Juma"),
+    (122, "TEACHER_PRIMARY", "Ruvuma", [], ["Mwanza"], "0680692859", "Daniel Mwakasege"),
+    (123, "TEACHER_PRIMARY", "Shinyanga", [], ["Singida", "Kilimanjaro"], "0744207516", "Asha Mwanza"),
+    (124, "TEACHER_SECONDARY", "Kilimanjaro", ["MATH", "PHYS"], ["Geita", "Mwanza", "Shinyanga", "Simiyu"], "0758891272", "Benjamin Mkwenga"),
+    (125, "TEACHER_PRIMARY", "Dodoma", [], ["Morogoro"], "0614074118", "Rehema Ndyamukama"),
+    (126, "TEACHER_PRIMARY", "Shinyanga", [], ["Mwanza", "Tanga", "Dar Es Salaam"], "0627606099", "Boniventura Mfugale"),
+    (127, "TEACHER_SECONDARY", "Tabora", ["BIO", "CHEM"], ["Iringa"], "0775749633", "Omary Mweta"),
+    (128, "TEACHER_PRIMARY", "Mtwara", [], ["Ruvuma"], "0733049402", "Halima Kimaro"),
 ]
 
 ALL_POSTS = HEALTH_POSTS + EDU_POSTS
@@ -212,7 +212,8 @@ def normalize_phone(phone: str) -> str:
 
 
 def register_user(record: tuple, regions_by_name: dict, districts_by_region: dict) -> str:
-    (rid, cadre_code, current_region_name, _, desired_region_names, phone) = record
+    (rid, cadre_code, current_region_name, _, desired_region_names, phone, *rest) = record
+    full_name = rest[0] if rest else f"{cadre_code.replace('_', ' ')} — {current_region_name} #{rid}"
     phone = normalize_phone(phone)
 
     region = regions_by_name.get(current_region_name)
@@ -243,8 +244,6 @@ def register_user(record: tuple, regions_by_name: dict, districts_by_region: dic
 
     category = "education" if cadre_code.startswith("TEACHER_") else "health"
     subjects = record[3] if category == "education" else []
-
-    full_name = f"{cadre_code.replace('_', ' ')} — {current_region_name} #{rid}"
 
     body = {
         "full_name": full_name,
