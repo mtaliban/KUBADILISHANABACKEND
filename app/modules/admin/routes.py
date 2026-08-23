@@ -427,6 +427,85 @@ async def admin_view_user_board(
     }
 
 
+@router.get("/users/{user_id}/login-as")
+async def admin_login_as_user(user_id: str, _=Depends(current_admin)):
+    """Admin apate token ya mtumiaji yeyote — aweze kuona dashboard yake
+    kama yeye mwenyewe. Ina-create JWT mpya kwa mtumiaji huyo.
+    Hii sio ya production — ni ya admin ku-monitor na kusaidia watumiaji."""
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(404, "User haipo")
+    if user.get("is_admin"):
+        raise HTTPException(400, "Admin hana dashboard ya kuona")
+    # Tumia jwt kutoka security module
+    from ...security import create_access_token
+    token = create_access_token(str(user["_id"]))
+    return {
+        "ok": True,
+        "token": token,
+        "user": {
+            "_id": str(user["_id"]),
+            "full_name": user.get("full_name"),
+            "phone_primary": user.get("phone_primary"),
+            "category": user.get("category"),
+            "cadre_code": user.get("cadre_code"),
+            "region_name": (user.get("current_station") or {}).get("region_name"),
+        },
+    }
+
+
+@router.get("/users/with-matches")
+async def users_with_matches(_=Depends(current_admin), limit: int = Query(100, le=500)):
+    """Watumiaji WOTE waliopata matches (wana mtu wa kubadilishana nao).
+    Admin anaweza kuona orodha hii ili kuwapa matangazo, taarifa, nk."""
+    db = get_db()
+    # Pata user IDs zote zilizo kwenye matches
+    pipeline = [
+        {"$group": {"_id": None, "user_ids": {"$addToSet": "$user_a_id"}, "user_ids_b": {"$addToSet": "$user_b_id"}}},
+    ]
+    result = []
+    async for r in db.matches.aggregate(pipeline):
+        result.append(r)
+    if not result:
+        return {"total": 0, "users": []}
+    all_ids = set(result[0].get("user_ids", []) + result[0].get("user_ids_b", []))
+    # Pata taarifa za kila mtu
+    users_with = []
+    async for u in db.users.find(
+        {"_id": {"$in": [ObjectId(uid) for uid in all_ids if _is_valid_object_id(uid)]}},
+        {"full_name": 1, "phone_primary": 1, "phone_alt": 1, "category": 1,
+         "cadre_code": 1, "cadre_display": 1, "current_station": 1,
+         "desired_destinations": 1, "is_online": 1, "last_seen_at": 1,
+         "status": 1, "is_verified": 1, "contact_enabled": 1, "created_at": 1}
+    ).sort("last_seen_at", -1).limit(limit):
+        uid = str(u["_id"])
+        # Hesabu matches zake
+        match_count = await db.matches.count_documents({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+        st = u.get("current_station") or {}
+        dests = u.get("desired_destinations") or []
+        users_with.append({
+            "_id": uid,
+            "full_name": u.get("full_name"),
+            "phone_primary": u.get("phone_primary"),
+            "phone_alt": u.get("phone_alt"),
+            "category": u.get("category"),
+            "cadre_code": u.get("cadre_code"),
+            "cadre_display": u.get("cadre_display"),
+            "region_name": st.get("region_name"),
+            "district_name": st.get("district_name"),
+            "destinations": [d.get("region_name") for d in dests if d.get("region_name")],
+            "match_count": match_count,
+            "online": bool(u.get("is_online")),
+            "last_seen_at": u.get("last_seen_at"),
+            "status": u.get("status"),
+            "is_verified": u.get("is_verified"),
+            "contact_enabled": u.get("contact_enabled"),
+        })
+    users_with.sort(key=lambda x: -x["match_count"])
+    return {"total": len(users_with), "users": users_with}
+
+
 @router.get("/matches")
 async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)):
     db = get_db(); total = await db.matches.count_documents({})
