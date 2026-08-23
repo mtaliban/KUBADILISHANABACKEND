@@ -808,7 +808,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
         {"$group": {"_id": {"region_id": "$current_station.region_id", "name": "$current_station.region_name"}, "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
-        users_by_region.append({"region_id": r["_id"]["region_id"], "region": r["_id"]["name"], "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {"region_id": None, "name": None}
+        users_by_region.append({"region_id": gid.get("region_id"), "region": gid.get("name"), "count": r["n"]})
 
     # Users kwa wilaya
     users_by_district = []
@@ -818,7 +819,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
                      "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
-        users_by_district.append({"region": r["_id"]["region"], "district": r["_id"]["district"], "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {}
+        users_by_district.append({"region": gid.get("region"), "district": gid.get("district"), "count": r["n"]})
 
     # Users kwa kada — pamoja na JINA la kada na LEVEL (Primary/Secondary)
     # ili admin aone "Walimu wa Secondary wangapi" (na kada nyingine).
@@ -878,7 +880,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
                      "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
-        incoming_by_region.append({"region_id": r["_id"]["region_id"], "region": r["_id"]["name"], "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {}
+        incoming_by_region.append({"region_id": gid.get("region_id"), "region": gid.get("name"), "count": r["n"]})
 
     incoming_by_district = []
     async for r in db.users.aggregate([
@@ -889,7 +892,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
                      "n": {"$sum": 1}}},
         {"$sort": {"n": -1}},
     ]):
-        incoming_by_district.append({"region": r["_id"]["region"], "district": r["_id"]["district"], "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {}
+        incoming_by_district.append({"region": gid.get("region"), "district": gid.get("district"), "count": r["n"]})
 
     # ── WANATOKA MIKOA IPI (incoming sources) ── kwa kila mkoa unaohamia,
     # watu wanaokuja wanatoka mikoa gani. Inachuja kwa destination: ikiwa
@@ -907,7 +911,8 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
         {"$sort": {"n": -1}},
         {"$limit": 300},
     ]):
-        incoming_sources.append({"to": r["_id"]["to"] or "?", "from": r["_id"]["from"] or "?", "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {}
+        incoming_sources.append({"to": gid.get("to") or "?", "from": gid.get("from") or "?", "count": r["n"]})
 
     # Users kwa KITUO (facility/school) cha sasa — ngazi ya mwisho ya breakdown.
     users_by_facility = []
@@ -921,8 +926,9 @@ async def reports(_=Depends(current_admin), days: int = Query(30),
         {"$sort": {"n": -1}},
         {"$limit": 200},
     ]):
-        users_by_facility.append({"facility_id": r["_id"]["facility_id"], "facility": r["_id"]["facility_name"],
-                                 "district": r["_id"]["district"], "region": r["_id"]["region"], "count": r["n"]})
+        gid = r["_id"] if isinstance(r["_id"], dict) else {}
+        users_by_facility.append({"facility_id": gid.get("facility_id"), "facility": gid.get("facility_name"),
+                                 "district": gid.get("district"), "region": gid.get("region"), "count": r["n"]})
 
     result = {
         "period_days": days, "since": since.isoformat(),
