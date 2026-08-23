@@ -184,9 +184,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     # Accept any Cloudflare quick-tunnel origin (https://xxxx.trycloudflare.com)
-    # plus localhost variants — otherwise the browser blocks cross-origin
-    # requests and users see "invalid credentials" on the public URL.
-    allow_origin_regex=r"https://.*\.trycloudflare\.com|http://localhost(:\d+)?|https://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
+    # plus localhost variants + Vercel production — otherwise the browser blocks
+    # cross-origin requests and users see "invalid credentials" on the public URL.
+    allow_origin_regex=r"https://.*\.trycloudflare\.com|https://.*\.vercel\.app|http://localhost(:\d+)?|https://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
