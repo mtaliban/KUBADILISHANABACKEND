@@ -161,7 +161,7 @@ async def list_users(_=Depends(current_admin),
     if subject: qd["subjects"] = subject
     if q: qd["$or"] = [{"full_name": {"$regex": _escape_regex(q), "$options": "i"}}, {"phone_primary": {"$regex": _escape_regex(q)}}]
     total = await db.users.count_documents(qd)
-    cur = db.users.find(qd, {"password_hash": 0}).sort("created_at", -1).skip(skip).limit(limit)
+    cur = db.users.find(qd).sort("created_at", -1).skip(skip).limit(limit)
     users = []
     async for u in cur:
         u["_id"] = str(u["_id"]); u["has_password"] = bool(u.get("password_hash")); users.append(u)
@@ -320,6 +320,104 @@ async def user_matches(user_id: str, _=Depends(current_admin), limit: int = Quer
             "matched_at": m.get("matched_at"),
         })
     return {"user_id": user_id, "user_name": user["full_name"], "total": len(out), "matches": out}
+
+
+@router.get("/users/{user_id}/board")
+async def admin_view_user_board(
+    user_id: str, _=Depends(current_admin),
+    region_ids: Optional[str] = None, region_id: Optional[int] = None,
+    district_id: Optional[int] = None, facility_id: Optional[str] = None,
+    scope: str = Query("incoming"),
+    subject_filter: Optional[str] = None, subject_q: Optional[str] = None,
+):
+    """Admin anaona DASHBOARD ya mtumiaji yeyote — kama mtumiaji mwenyewe.
+    Hii inarudisha data sawa na /matches/board lakini kwa mtumiaji aliye specifyiwa.
+    Inatumia MWEKE WA MTAUMIAJI (sio wa admin) kufanya matching."""
+    db = get_db()
+    me = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not me:
+        raise HTTPException(404, "User haipo")
+    if me.get("is_admin"):
+        raise HTTPException(400, "Admin hana dashboard ya kuona — tumia /admin/users pekee")
+
+    my_station = me.get("current_station") or {}
+    my_category = me.get("category")
+    dests = me.get("desired_destinations") or []
+
+    # Mikoa anayotaka kuja (destination region IDs)
+    dest_region_ids = list({d["region_id"] for d in dests if d.get("region_id")})
+
+    # Filter: region_ids au region_id
+    if region_ids:
+        rids = [int(x) for x in region_ids.split(",") if x.strip().isdigit()]
+    elif region_id:
+        rids = [region_id]
+    else:
+        rids = dest_region_ids
+
+    # Query: nani anataka kuja mkoa wangu
+    q: dict = {
+        "category": my_category,
+        "status": "active",
+        "_id": {"$ne": me["_id"]},
+        "is_admin": {"$ne": True},
+        "desired_destinations.region_id": {"$in": rids} if rids else {"$exists": True, "$ne": []},
+    }
+    if district_id:
+        q["desired_destinations.district_id"] = district_id
+    if facility_id:
+        q["desired_destinations.facility_id"] = facility_id
+
+    cur = db.users.find(q, {
+        "full_name": 1, "phone_primary": 1, "phone_alt": 1,
+        "cadre_code": 1, "cadre_display": 1, "category": 1,
+        "current_station": 1, "desired_destinations": 1, "subjects": 1,
+        "created_at": 1, "last_seen_at": 1, "is_online": 1,
+    })
+    candidates = []
+    async for c in cur:
+        st = c.get("current_station") or {}
+        c_dests = c.get("desired_destinations") or []
+        # Score: destination region match
+        score = 0.0
+        for d in c_dests:
+            if d.get("region_id") in rids:
+                score = max(score, 1.0)
+            elif d.get("region_id") in dest_region_ids:
+                score = max(score, 0.5)
+        candidates.append({
+            "user_id": str(c["_id"]),
+            "full_name": c.get("full_name"),
+            "phone_primary": c.get("phone_primary"),
+            "phone_alt": c.get("phone_alt"),
+            "cadre_code": c.get("cadre_code"),
+            "cadre_display": c.get("cadre_display"),
+            "category": c.get("category"),
+            "subjects": c.get("subjects") or [],
+            "current_station": st,
+            "desired_destinations": c_dests,
+            "created_at": c.get("created_at"),
+            "last_seen_at": c.get("last_seen_at"),
+            "online": bool(c.get("is_online")),
+            "score": score,
+        })
+
+    # Sort by score desc, then created_at desc
+    candidates.sort(key=lambda x: (-x["score"], x.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)), reverse=False)
+    candidates.sort(key=lambda x: (-x["score"]))
+
+    return {
+        "scope": scope,
+        "total": len(candidates),
+        "candidates": candidates,
+        "as_user": {
+            "user_id": user_id,
+            "full_name": me.get("full_name"),
+            "category": my_category,
+            "cadre_code": me.get("cadre_code"),
+            "region_name": my_station.get("region_name"),
+        },
+    }
 
 
 @router.get("/matches")
