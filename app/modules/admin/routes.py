@@ -406,16 +406,23 @@ async def admin_view_user_board(
     candidates.sort(key=lambda x: (-x["score"], x.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)), reverse=False)
     candidates.sort(key=lambda x: (-x["score"]))
 
+    # Mikoa yote ya Tanzania — admin achague chochote
+    all_regions = []
+    async for r in db.regions.find({}, {"id": 1, "name": 1}).sort("id", 1):
+        all_regions.append({"id": r["id"], "name": r["name"]})
+
     return {
         "scope": scope,
         "total": len(candidates),
         "candidates": candidates,
+        "regions": all_regions,
         "as_user": {
             "user_id": user_id,
             "full_name": me.get("full_name"),
             "category": my_category,
             "cadre_code": me.get("cadre_code"),
             "region_name": my_station.get("region_name"),
+            "desired_regions": [d.get("region_name") for d in dests if d.get("region_name")],
         },
     }
 
