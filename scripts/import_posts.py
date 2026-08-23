@@ -133,7 +133,7 @@ HEALTH_POSTS = [
     (22, "CO", "Kilimanjaro", None, ["Mwanza", "Mara", "Shinyanga", "Geita"], "0742012652"),
     (23, "MA", "Ruvuma", None, ["Arusha"], "0683215717"),  # Ngorongoro=Arusha
     (24, "EN", "Mara", None, ["Iringa"], "0757823818"),  # Serengeti=Mara
-    (25, "H/A", "Geita", None, ["Coast"], "0717588286"),  # (dup 26)
+    (25, "HA", "Geita", None, ["Coast"], "0717588286"),  # (dup 26)
     (26, "NO", "Mbeya", None, ["Dar Es Salaam"], "0695492590"),  # (28) MZRH=Mbeya, all destinations Dar
     (27, "RN", "Tanga", None, ["Geita", "Shinyanga"], "0656170700"),  # mkinga=Tanga
     (28, "ANO", "Mbeya", None, ["Mwanza", "Shinyanga"], "0614173800"),  # chunya=Mbeya, magu=Mwanza
@@ -182,8 +182,8 @@ EDU_POSTS = [
     (109, "TEACHER_PRIMARY", "Kigoma", [], ["Shinyanga", "Mwanza", "Simiyu"], "0627362558"),  # Kibondo=Kigoma
     (110, "TEACHER_SECONDARY", "Tanga", ["HIST", "ENG"], ["Katavi"], "0688573707"),  # Lushoto=Tanga
     (111, "TEACHER_SECONDARY", "Kilimanjaro", ["PHYS", "MATH"], ["Mtwara"], "0779002783"),
-    (112, "TEACHER_SECONDARY", "Mwanza", ["MATH"], ["Katavi"], "0764302179"),
-    (113, "TEACHER_SECONDARY", "Kagera", [], ["Singida", "Manyara", "Arusha", "Dodoma"], "0620494407"),  # Karagwe=Kagera
+    (112, "TEACHER_SECONDARY", "Mwanza", ["MATH"], ["Katavi", "Rukwa"], "0764302179"),
+    (113, "TEACHER_SECONDARY", "Kagera", ["ENG", "KISW"], ["Singida", "Manyara", "Arusha", "Dodoma"], "0620494407"),  # Karagwe=Kagera
     (114, "TEACHER_PRIMARY", "Singida", [], ["Rukwa", "Songwe", "Katavi"], "0617333513"),
     (115, "TEACHER_SECONDARY", "Ruvuma", ["MATH", "IT"], ["Morogoro", "Iringa", "Dodoma"], "0717495860"),  # Nyasa=Ruvuma
     (116, "TEACHER_PRIMARY", "Rukwa", [], ["Morogoro", "Singida", "Manyara", "Arusha", "Tanga", "Kilimanjaro"], "0703451764"),
@@ -191,11 +191,14 @@ EDU_POSTS = [
     (118, "TEACHER_SECONDARY", "Mtwara", ["BIO", "GEO"], ["Mbeya", "Iringa"], "0621307026"),
     (119, "TEACHER_PRIMARY", "Kilimanjaro", [], ["Coast", "Dar Es Salaam"], "0743553807"),  # Hai=Kilimanjaro
     (120, "TEACHER_SECONDARY", "Mbeya", ["KISW", "ENG", "MATH"], ["Geita", "Mwanza"], "0684740349"),
-    (121, "TEACHER_SECONDARY", "Coast", [], ["Morogoro", "Geita"], "0770994640"),  # Mkuranga=Coast
+    (121, "TEACHER_SECONDARY", "Coast", ["ENG", "KISW"], ["Morogoro", "Geita"], "0770994640"),  # Mkuranga=Coast
     (122, "TEACHER_PRIMARY", "Ruvuma", [], ["Mwanza"], "0680692859"),  # Nyasa=Ruvuma
     (123, "TEACHER_PRIMARY", "Shinyanga", [], ["Singida", "Kilimanjaro"], "0744207516"),
     (124, "TEACHER_SECONDARY", "Kilimanjaro", ["MATH", "PHYS"], ["Geita", "Mwanza", "Shinyanga", "Simiyu"], "0758891272"),
     (125, "TEACHER_PRIMARY", "Dodoma", [], ["Morogoro"], "0614074118"),  # Kondoa=Dodoma
+    (126, "TEACHER_PRIMARY", "Shinyanga", [], ["Mwanza", "Tanga", "Dar Es Salaam"], "0627606099"),  # Msalala=Shinyanga, Handeni=Tanga, Ubungo=Dar
+    (127, "TEACHER_SECONDARY", "Tabora", ["BIO", "CHEM"], ["Iringa"], "0775749633"),  # Nzega TC=Tabora, Mafinga=Iringa
+    (128, "TEACHER_PRIMARY", "Mtwara", [], ["Ruvuma"], "0733049402"),  # Masasi=Mtwara, Songea MC=Ruvuma
 ]
 
 ALL_POSTS = HEALTH_POSTS + EDU_POSTS
