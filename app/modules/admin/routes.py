@@ -538,11 +538,29 @@ async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)
     out = []
     async for m in cur:
         m["_id"] = str(m["_id"])
-        a = await db.users.find_one({"_id": ObjectId(m["user_a_id"])}, {"full_name": 1, "phone_primary": 1, "cadre_code": 1, "current_station": 1})
-        b = await db.users.find_one({"_id": ObjectId(m["user_b_id"])}, {"full_name": 1, "phone_primary": 1, "cadre_code": 1, "current_station": 1})
+        a = await db.users.find_one({"_id": ObjectId(m["user_a_id"])},
+            {"full_name": 1, "phone_primary": 1, "cadre_code": 1, "category": 1, "current_station": 1, "desired_destinations": 1})
+        b = await db.users.find_one({"_id": ObjectId(m["user_b_id"])},
+            {"full_name": 1, "phone_primary": 1, "cadre_code": 1, "category": 1, "current_station": 1, "desired_destinations": 1})
         if a and b:
-            m["user_a"] = {"full_name": a["full_name"], "phone": a["phone_primary"], "cadre": a["cadre_code"], "region": a["current_station"]["region_name"]}
-            m["user_b"] = {"full_name": b["full_name"], "phone": b["phone_primary"], "cadre": b["cadre_code"], "region": b["current_station"]["region_name"]}
+            def _dest_names(dests):
+                return [d.get("region_name") for d in (dests or []) if d.get("region_name")]
+            a_dests = _dest_names(a.get("desired_destinations"))
+            b_dests = _dest_names(b.get("desired_destinations"))
+            m["user_a"] = {
+                "full_name": a["full_name"], "phone": a["phone_primary"],
+                "cadre": a["cadre_code"], "category": a.get("category"),
+                "region": a["current_station"]["region_name"],
+                "district": a["current_station"].get("district_name"),
+                "destinations": a_dests,
+            }
+            m["user_b"] = {
+                "full_name": b["full_name"], "phone": b["phone_primary"],
+                "cadre": b["cadre_code"], "category": b.get("category"),
+                "region": b["current_station"]["region_name"],
+                "district": b["current_station"].get("district_name"),
+                "destinations": b_dests,
+            }
         out.append(m)
     return {"total": total, "matches": out}
 
