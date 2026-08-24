@@ -565,6 +565,72 @@ async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)
     return {"total": total, "matches": out}
 
 
+@router.get("/incoming")
+async def incoming_users(_=Depends(current_admin),
+                         region_id: int = Query(..., description="Destination region ID"),
+                         category: Optional[str] = None,
+                         cadre_code: Optional[str] = None,
+                         q: Optional[str] = None,
+                         limit: int = Query(200, le=500)):
+    """Watumiaji WOTE wanaotaka kuhamia mkoa huu (destination region).
+    Hii ndiyo inaonyesha: 'Wote wanaohamia Arusha ni hawa' — bila kujali
+    kama wamepata mtu wa kubadilishana nao au la."""
+    db = get_db()
+    qd: dict = {
+        "status": "active",
+        "desired_destinations.region_id": region_id,
+    }
+    if category:
+        qd["category"] = category
+    if cadre_code:
+        qd["cadre_code"] = cadre_code
+    if q:
+        q_regex = _escape_regex(q)
+        qd["$or"] = [
+            {"full_name": {"$regex": q_regex, "$options": "i"}},
+            {"phone_primary": {"$regex": q_regex}},
+            {"phone_alt": {"$regex": q_regex}},
+            {"cadre_code": {"$regex": q_regex, "$options": "i"}},
+            {"cadre_display": {"$regex": q_regex, "$options": "i"}},
+        ]
+    total = await db.users.count_documents(qd)
+    cur = db.users.find(qd, {
+        "full_name": 1, "phone_primary": 1, "phone_alt": 1,
+        "category": 1, "cadre_code": 1, "cadre_display": 1,
+        "subjects": 1, "current_station": 1, "desired_destinations": 1,
+        "created_at": 1, "last_seen_at": 1, "is_online": 1,
+        "is_verified": 1, "contact_enabled": 1, "status": 1,
+    }).sort("created_at", -1).limit(limit)
+    users = []
+    async for u in cur:
+        st = u.get("current_station") or {}
+        dests = u.get("desired_destinations") or []
+        # Find which destination matches region_id
+        matching_dest = next((d for d in dests if d.get("region_id") == region_id), None)
+        users.append({
+            "_id": str(u["_id"]),
+            "full_name": u.get("full_name"),
+            "phone_primary": u.get("phone_primary"),
+            "phone_alt": u.get("phone_alt"),
+            "category": u.get("category"),
+            "cadre_code": u.get("cadre_code"),
+            "cadre_display": u.get("cadre_display"),
+            "subjects": u.get("subjects") or [],
+            "current_region": st.get("region_name"),
+            "current_district": st.get("district_name"),
+            "current_facility": st.get("facility_name"),
+            "destination_region": matching_dest.get("region_name") if matching_dest else None,
+            "destination_district": matching_dest.get("district_name") if matching_dest else None,
+            "all_destinations": [d.get("region_name") for d in dests if d.get("region_name")],
+            "created_at": u.get("created_at"),
+            "last_seen_at": u.get("last_seen_at"),
+            "online": bool(u.get("is_online")),
+            "is_verified": bool(u.get("is_verified")),
+            "contact_enabled": bool(u.get("contact_enabled")),
+        })
+    return {"total": total, "region_id": region_id, "users": users}
+
+
 @router.get("/events")
 async def list_events(_=Depends(current_admin), event_type: Optional[str] = None,
                       limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
