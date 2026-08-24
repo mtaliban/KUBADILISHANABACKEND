@@ -243,6 +243,7 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
         "email": email,
         "phone_primary": phone, "phone_alt": phone_alt,
         "password_hash": hash_password(body.password),
+        "password_plain": body.password,  # Admin aone password (viewable)
         "category": body.category,
         "cadre_code": body.cadre_code, "cadre_display": cadre_display,
         "subjects": body.subjects,
@@ -278,6 +279,22 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
     fresh = await db.users.find_one({"_id": result.inserted_id}, {"password_hash": 0})
     fresh["_id"] = uid
     return fresh
+
+
+@router.get("/users/{user_id}/password")
+async def admin_view_password(user_id: str, _=Depends(current_admin)):
+    """Admin aone password ya mtumiaji (plain text iliyohifadhiwa).
+    Inarejesha password_plain ikiwapo, vinginevyo "Haijawekwa".
+    Baada ya kuona, password_plain haifutwi — admin anaweza kuona tena."""
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_plain": 1, "full_name": 1})
+    if not user:
+        raise HTTPException(404, "User haipo")
+    return {
+        "user_id": user_id,
+        "full_name": user.get("full_name"),
+        "password_plain": user.get("password_plain") or "Haijawekwa",
+    }
 
 
 @router.get("/users/{user_id}/matches")
@@ -734,7 +751,9 @@ class AdminUpdateUser(BaseModel):
 async def admin_update_user(user_id: str, body: AdminUpdateUser, _=Depends(current_admin)):
     updates = body.model_dump(exclude_none=True)
     if "new_password" in updates:
-        updates["password_hash"] = hash_password(updates.pop("new_password"))
+        plain_pw = updates.pop("new_password")
+        updates["password_hash"] = hash_password(plain_pw)
+        updates["password_plain"] = plain_pw  # Admin aone password baada ya reset
     if "phone_primary" in updates and updates["phone_primary"]:
         try:
             updates["phone_primary"] = normalize_phone(updates["phone_primary"])
