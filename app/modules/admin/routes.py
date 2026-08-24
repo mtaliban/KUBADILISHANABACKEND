@@ -287,13 +287,28 @@ async def admin_view_password(user_id: str, _=Depends(current_admin)):
     Inarejesha password_plain ikiwapo, vinginevyo "Haijawekwa".
     Baada ya kuona, password_plain haifutwi — admin anaweza kuona tena."""
     db = get_db()
-    user = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_plain": 1, "full_name": 1})
+    user = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_plain": 1, "full_name": 1, "password_hash": 1})
     if not user:
         raise HTTPException(404, "User haipo")
+    plain = user.get("password_plain")
+    has_hash = bool(user.get("password_hash"))
+    if plain:
+        status = "available"
+    elif has_hash:
+        status = "hash_only"  # password_hash ipo lakini plain haijawekwa
+    else:
+        status = "none"
     return {
         "user_id": user_id,
         "full_name": user.get("full_name"),
-        "password_plain": user.get("password_plain") or "Haijawekwa",
+        "password_plain": plain or None,
+        "status": status,
+        "message": (
+            "Password inapatikana" if status == "available"
+            else "Mtumiaji huyu alijisajili kabla ya kipengele hiki. Reset password kuiona."
+            if status == "hash_only"
+            else "Hakuna password imefungwa"
+        ),
     }
 
 
