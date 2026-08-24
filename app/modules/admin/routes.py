@@ -480,8 +480,32 @@ async def users_with_matches(_=Depends(current_admin), limit: int = Query(100, l
          "status": 1, "is_verified": 1, "contact_enabled": 1, "created_at": 1}
     ).sort("last_seen_at", -1).limit(limit):
         uid = str(u["_id"])
-        # Hesabu matches zake
-        match_count = await db.matches.count_documents({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+        # Hesabu matches zake + pata majina ya waliokutanishwa
+        match_cursor = db.matches.find({"$or": [{"user_a_id": uid}, {"user_b_id": uid}]})
+        matched_users = []
+        async for m in match_cursor:
+            other_id = m["user_b_id"] if m["user_a_id"] == uid else m["user_a_id"]
+            if not _is_valid_object_id(other_id):
+                continue
+            other = await db.users.find_one(
+                {"_id": ObjectId(other_id)},
+                {"full_name": 1, "phone_primary": 1, "category": 1, "cadre_display": 1,
+                 "current_station": 1, "subjects": 1}
+            )
+            if other:
+                ost = other.get("current_station") or {}
+                matched_users.append({
+                    "user_id": other_id,
+                    "full_name": other.get("full_name"),
+                    "phone_primary": other.get("phone_primary"),
+                    "category": other.get("category"),
+                    "cadre_display": other.get("cadre_display"),
+                    "region_name": ost.get("region_name"),
+                    "district_name": ost.get("district_name"),
+                    "subjects": other.get("subjects", []),
+                    "score": m.get("score", 0),
+                })
+        match_count = len(matched_users)
         st = u.get("current_station") or {}
         dests = u.get("desired_destinations") or []
         users_with.append({
@@ -496,6 +520,7 @@ async def users_with_matches(_=Depends(current_admin), limit: int = Query(100, l
             "district_name": st.get("district_name"),
             "destinations": [d.get("region_name") for d in dests if d.get("region_name")],
             "match_count": match_count,
+            "matched_users": matched_users,
             "online": bool(u.get("is_online")),
             "last_seen_at": u.get("last_seen_at"),
             "status": u.get("status"),
