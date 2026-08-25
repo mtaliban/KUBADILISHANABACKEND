@@ -135,6 +135,7 @@ async def board(
     subject_match: bool = Query(False, description="[backward-compat] true = waone tu wenye masomo yanayofanana (sawa na subject_filter=any)"),
     subject_filter: Literal["off", "any", "all", "none"] = Query("off", description="off = wote; any = somo moja linalofanana; all = masomo yote mawili yanafanana; none = wasio na somo linalofanana"),
     subject_q: Optional[str] = Query(None, description="comma-separated subject codes — search walimu wenye masomo haya (yoyote kati yao)"),
+    cadre_code: Optional[str] = Query(None, description="kada code — kichujio cha afya (k.m. CO, HA, ANO, EN)"),
     limit: int = Query(200, le=1000),
     bypass_cache: bool = Query(False, description="skip Redis board cache — tumia kwenye live reloads (WS events)"),
 ):
@@ -153,7 +154,7 @@ async def board(
     # Redis cache (5s) — board ni query nzito (full candidates scan); TTL fupi
     # inalinda `online` isiwe stale sana. WS events zinabust frontend cache
     # papo hapo, hivyo board inaonekana LIVE hata ikiwa Redis cache ipo.
-    cache_key = f"board:{user['_id']}:{scope}:{region_ids or ''}:{region_id or ''}:{district_id or ''}:{facility_id or ''}:{subject_match}:{subject_filter}:{subject_q or ''}:{limit}"
+    cache_key = f"board:{user['_id']}:{scope}:{region_ids or ''}:{region_id or ''}:{district_id or ''}:{facility_id or ''}:{subject_match}:{subject_filter}:{subject_q or ''}:{cadre_code or ''}:{limit}"
     cached_res = await _board_cache_get(cache_key)
     if cached_res is not None and not bypass_cache:
         return cached_res
@@ -179,6 +180,10 @@ async def board(
         q["current_station.district_id"] = district_id
     if facility_id is not None:
         q["current_station.facility_id"] = facility_id
+    # Kichujio cha kada (afya): mtu aweze kuchuja kwa kada maalum
+    # (k.m. CO, HA, ANO, EN) — kama subject_filter kwa walimu.
+    if cadre_code:
+        q["cadre_code"] = cadre_code.upper()
     cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
     raw = [u async for u in cursor]
 
