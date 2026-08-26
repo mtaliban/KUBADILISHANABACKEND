@@ -166,9 +166,16 @@ async def board(
     # ya idara hiyo (usichanganye data za walimu na afya!).
     q: dict = {"status": "active", "is_admin": {"$ne": True},
                "_id": {"$ne": user["_id"]}, "category": my_category}
-    # ONDOWA cadre_level restriction — mtu aone WOTE wa idara yake
-    # (elimu/afya) wanaokuja mkoa wake, sio tu kada moja.
-    # Kichujio cha masomo kinapatikana kwenye frontend (subject_filter).
+    # Kichujio cha LEVEL kwa elimu: mwalimu wa msingi aone walimu wa msingi tu,
+    # sio wa sekondari (na kinyume chake). Afya haina level filter.
+    my_cadre = user.get("cadre_code")
+    if my_cadre and my_category == "education":
+        my_cadre_doc = await db.cadres.find_one({"code": my_cadre})
+        my_level = (my_cadre_doc or {}).get("level")
+        if my_level:
+            level_codes = [c["code"] async for c in db.cadres.find({"category": my_category, "level": my_level})]
+            if level_codes:
+                q["cadre_code"] = {"$in": level_codes}
     region_filter: list[int] = []
     if region_ids:
         region_filter = [int(x) for x in region_ids.split(",") if x.strip().lstrip("-").isdigit()]
