@@ -66,7 +66,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_ALG: HS256
       JWT_EXPIRE_HOURS: 24
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://exchangefrontend.vercel.app}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://exchangefrontend.vercel.app,https://exchangefrontend-c6tm.vercel.app,https://exchangefrontend-kubadilishana.vercel.app,https://esstranfer.com}
       # EMAIL (SMTP/MailerSend) — code za 2FA & email verification hutumwa kwa njia hii.
       # Weka kwenye .env ya server (sio git!) au Admin → Mipangilio → Mipangilio ya Email.
       SMTP_HOST: ${SMTP_HOST:-}

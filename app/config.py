@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 24
 
     # CORS
-    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    cors_origins: str = "http://localhost:3000,http://localhost:5173,https://exchangefrontend-c6tm.vercel.app,https://exchangefrontend-kubadilishana.vercel.app,https://esstranfer.com,http://16.171.23.21:3000"
 
     # Files
     csv_output_dir: str = "/app/csv_output"
