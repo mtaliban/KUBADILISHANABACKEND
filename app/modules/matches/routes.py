@@ -1,3 +1,4 @@
+import re
 from typing import Literal, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Query
@@ -132,6 +133,8 @@ async def board(
     region_ids: Optional[str] = Query(None, description="comma-separated source region ids (multi-region default)"),
     district_id: Optional[int] = None,
     facility_id: Optional[str] = None,
+    q_text: Optional[str] = Query(None, description="search by name or phone number"),
+    source_region_id: Optional[int] = Query(None, description="filter by source region (current_station.region_id)"),
     subject_match: bool = Query(False, description="[backward-compat] true = waone tu wenye masomo yanayofanana (sawa na subject_filter=any)"),
     subject_filter: Literal["off", "any", "all", "none"] = Query("off", description="off = wote; any = somo moja linalofanana; all = masomo yote mawili yanafanana; none = wasio na somo linalofanana"),
     subject_q: Optional[str] = Query(None, description="comma-separated subject codes — search walimu wenye masomo haya (yoyote kati yao)"),
@@ -194,6 +197,19 @@ async def board(
     # (k.m. CO, HA, ANO, EN) — kama subject_filter kwa walimu.
     if cadre_code:
         q["cadre_code"] = cadre_code.upper()
+    # Search by name or phone number (admin only feature)
+    if q_text:
+        q_text_escaped = re.escape(q_text)
+        q["$or"] = [
+            {"full_name": {"$regex": q_text_escaped, "$options": "i"}},
+            {"phone_primary": {"$regex": q_text_escaped}},
+            {"phone_alt": {"$regex": q_text_escaped}},
+            {"cadre_code": {"$regex": q_text_escaped, "$options": "i"}},
+            {"cadre_display": {"$regex": q_text_escaped, "$options": "i"}},
+        ]
+    # Filter by source region (current station)
+    if source_region_id is not None:
+        q["current_station.region_id"] = source_region_id
     cursor = db.users.find(q, {"password_hash": 0}).sort("created_at", -1)
     raw = [u async for u in cursor]
 
