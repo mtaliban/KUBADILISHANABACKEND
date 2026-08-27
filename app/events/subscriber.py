@@ -279,14 +279,24 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
     elif topic == TOPIC_MATCH_FOUND:
         a_id, b_id = payload.get("user_a_id"), payload.get("user_b_id")
         score = round(float(payload.get("score") or 0) * 100)
-        a = db.users.find_one({"_id": ObjectId(a_id)}, {"full_name": 1}) if a_id else None
-        b = db.users.find_one({"_id": ObjectId(b_id)}, {"full_name": 1}) if b_id else None
+        a = db.users.find_one({"_id": ObjectId(a_id)}, {"full_name": 1, "cadre_display": 1, "category": 1}) if a_id else None
+        b = db.users.find_one({"_id": ObjectId(b_id)}, {"full_name": 1, "cadre_display": 1, "category": 1}) if b_id else None
         if a_id and b:
             notify([b_id], "match.found", f"{b['full_name']}, mtu mpya wa kubadilishana nawe ",
                    f"{a['full_name']} — score {score}%", {"user_id": a_id, "score": payload.get("score")})
         if b_id and a:
             notify([a_id], "match.found", f"{a['full_name']}, mtu mpya wa kubadilishana nawe ",
                    f"{b['full_name']} — score {score}%", {"user_id": b_id, "score": payload.get("score")})
+        # Notify admins — match mpya imepatikana
+        if a and b:
+            a_name = a.get('full_name', '?')
+            b_name = b.get('full_name', '?')
+            cadre = a.get('cadre_display', a_id)
+            cat = a.get('category', '?')
+            notify(_admin_user_ids(db), "match.found",
+                   f"Match mpya: {a_name} ↔ {b_name}",
+                   f"{cadre} ({cat}) — score {score}%",
+                   {"user_a_id": a_id, "user_b_id": b_id, "score": payload.get("score")})
     elif topic.startswith(TOPIC_MESSAGE_SENT + "/"):
         to_id = topic.rsplit("/", 1)[1]
         notify([to_id], "message.sent", f"Ujumbe kutoka {payload.get('from_full_name', 'mtumiaji')}",
