@@ -675,6 +675,7 @@ async def real_matches(_=Depends(current_admin),
                         "cadre_code": u_doc.get("cadre_code"),
                         "cadre_display": u_doc.get("cadre_display"),
                         "category": u_doc.get("category"),
+                        "subjects": u_doc.get("subjects", []),
                         "current_region": station.get("region_name"),
                         "current_district": station.get("district_name"),
                         "current_facility": station.get("facility_name"),
@@ -682,6 +683,10 @@ async def real_matches(_=Depends(current_admin),
                         "online": bool(u_doc.get("is_online")),
                         "is_verified": bool(u_doc.get("is_verified")),
                     }
+                # Subjects overlap info
+                sa = set(a.get("subjects") or [])
+                sb = set(b.get("subjects") or [])
+                common_subjects = sorted(sa & sb) if sa and sb else []
                 matches.append({
                     "user_a": _user_info(a, a_st),
                     "user_b": _user_info(b, b_st),
@@ -689,6 +694,7 @@ async def real_matches(_=Depends(current_admin),
                     "cadre_display": a.get("cadre_display"),
                     "category": cat,
                     "cadre_code": cadre,
+                    "common_subjects": common_subjects,
                 })
     # Sort by score (highest first)
     matches.sort(key=lambda m: -m["score"])
