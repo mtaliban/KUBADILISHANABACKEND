@@ -597,6 +597,104 @@ async def list_matches(_=Depends(current_admin), limit: int = Query(100, le=500)
     return {"total": total, "matches": out}
 
 
+@router.get("/real-matches")
+async def real_matches(_=Depends(current_admin),
+                       category: Optional[str] = None,
+                       cadre_code: Optional[str] = None,
+                       limit: int = Query(200, le=1000)):
+    """Match ZA KWELI — pairs ambao A anataka kwenda mkoa wa B, B anataka kuja mkoa wa A.
+    Incompute real-time: category + cadre zinalingana, destinations ni reciprocal,
+    na score inaonyesha ukaribu wa kituo (0.5 = mkoa, 0.85 = wilaya, 1.0 = kituo)."""
+    db = get_db()
+    # Pata watumiaji wote active walio na destinations
+    q: dict = {"status": "active", "desired_destinations.0": {"$exists": True}}
+    if category:
+        q["category"] = category
+    if cadre_code:
+        q["cadre_code"] = cadre_code
+    users = []
+    async for u in db.users.find(q, {
+        "full_name": 1, "phone_primary": 1, "phone_alt": 1,
+        "category": 1, "cadre_code": 1, "cadre_display": 1,
+        "subjects": 1, "current_station": 1, "desired_destinations": 1,
+        "is_online": 1, "last_seen_at": 1, "is_verified": 1,
+        "contact_enabled": 1, "status": 1,
+    }):
+        users.append(u)
+    # Group by (category, cadre_code) — match ndani ya kada moja
+    groups: dict = {}
+    for u in users:
+        key = (u["category"], u["cadre_code"])
+        groups.setdefault(key, []).append(u)
+    matches = []
+    seen_pairs: set = set()
+    for (cat, cadre), group in groups.items():
+        for i, a in enumerate(group):
+            a_st = a.get("current_station") or {}
+            a_region = a_st.get("region_id")
+            a_dests = a.get("desired_destinations") or []
+            a_dest_ids = {d.get("region_id") for d in a_dests if d.get("region_id")}
+            if not a_region or not a_dest_ids:
+                continue
+            for b in group[i + 1:]:
+                b_st = b.get("current_station") or {}
+                b_region = b_st.get("region_id")
+                b_dests = b.get("desired_destinations") or []
+                b_dest_ids = {d.get("region_id") for d in b_dests if d.get("region_id")}
+                if not b_region or not b_dest_ids:
+                    continue
+                # Reciprocal: A anataka kuja mkoa wa B, B anataka kuja mkoa wa A
+                if not (b_region in a_dest_ids and a_region in b_dest_ids):
+                    continue
+                # Subjects overlap (kama zipo)
+                if a.get("subjects") or b.get("subjects"):
+                    sa = set(a.get("subjects") or [])
+                    sb = set(b.get("subjects") or [])
+                    if sa and sb and not (sa & sb):
+                        continue
+                # Compute score — kwa kila destination pair
+                score = 0.5
+                for d in a_dests:
+                    if d.get("facility_id") and b_st.get("facility_id") == d["facility_id"]:
+                        score = max(score, 1.0)
+                    elif d.get("district_id") and b_st.get("district_id") == d["district_id"]:
+                        score = max(score, 0.85)
+                    elif d.get("region_id") == b_region:
+                        score = max(score, 0.65)
+                # Pair key — kuepuka duplicates
+                pair_key = tuple(sorted([str(a["_id"]), str(b["_id"])]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                def _user_info(u_doc, station):
+                    return {
+                        "user_id": str(u_doc["_id"]),
+                        "full_name": u_doc.get("full_name"),
+                        "phone_primary": u_doc.get("phone_primary"),
+                        "phone_alt": u_doc.get("phone_alt"),
+                        "cadre_code": u_doc.get("cadre_code"),
+                        "cadre_display": u_doc.get("cadre_display"),
+                        "category": u_doc.get("category"),
+                        "current_region": station.get("region_name"),
+                        "current_district": station.get("district_name"),
+                        "current_facility": station.get("facility_name"),
+                        "destinations": [d.get("region_name") for d in (u_doc.get("desired_destinations") or []) if d.get("region_name")],
+                        "online": bool(u_doc.get("is_online")),
+                        "is_verified": bool(u_doc.get("is_verified")),
+                    }
+                matches.append({
+                    "user_a": _user_info(a, a_st),
+                    "user_b": _user_info(b, b_st),
+                    "score": score,
+                    "cadre_display": a.get("cadre_display"),
+                    "category": cat,
+                    "cadre_code": cadre,
+                })
+    # Sort by score (highest first)
+    matches.sort(key=lambda m: -m["score"])
+    return {"total": len(matches), "matches": matches[:limit]}
+
+
 @router.get("/incoming")
 async def incoming_users(_=Depends(current_admin),
                          region_id: int = Query(..., description="Destination region ID"),
