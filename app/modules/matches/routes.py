@@ -160,12 +160,15 @@ async def board(
         return cached_res
     my_station = user.get("current_station") or {}
     my_category = user.get("category") or "health"
+    is_admin = user.get("is_admin", False)
 
     # ── Gather candidates (full set for stats; limited for grid) ──
-    # Idara yangu tu (walimu → elimu, afya → afya) — lakini KADA ZOTE ndani
-    # ya idara hiyo (usichanganye data za walimu na afya!).
+    # Admin anaona WATU WOTE (health + education) — si category yake pekee.
+    # mtu wa kawaida anaona idara yake tu (walimu → elimu, afya → afya).
     q: dict = {"status": "active", "is_admin": {"$ne": True},
-               "_id": {"$ne": user["_id"]}, "category": my_category}
+               "_id": {"$ne": user["_id"]}}
+    if not is_admin:
+        q["category"] = my_category
     # Kichujio cha LEVEL kwa elimu: mwalimu wa msingi aone walimu wa msingi tu,
     # sio wa sekondari (na kinyume chake). Afya haina level filter.
     my_cadre = user.get("cadre_code")
