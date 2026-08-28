@@ -180,14 +180,14 @@ async def login(body: LoginRequest):
                       "message": f"Code ya uthibitisho (2FA) imetumwa kwa {email}. Halali dakika {OTP_TTL_MINUTES}."}
         return resp
 
-    # ── Phone → regular user login (primary OR alt) ──
+    # ── Phone → regular user login (primary OR alt, bila password) ──
     try:
         phone = normalize_phone(identifier)
     except ValueError as e:
         raise HTTPException(422, str(e))
     user = await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]})
-    if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(401, "Invalid credentials")
+    if not user:
+        raise HTTPException(401, "Namba ya simu haijapatikana kwenye mfumo")
     if user.get("status") == "disabled":
         raise HTTPException(403, "Account disabled — wasiliana na admin")
     # Admins log in with their email — never a phone number.

@@ -50,7 +50,7 @@ class RegisterResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     phone: str
-    password: str
+    password: str | None = None
 
 
 class LoginResponse(BaseModel):
