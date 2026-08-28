@@ -124,18 +124,16 @@ async def test_login_success_and_failure(client, db):
     await db.cadres.insert_many(seed_cadres(db))
     await client.post("/auth/register", json=register_payload())
 
+    # Phone-only login: hakuna password inahitajika
     ok = await client.post("/auth/login",
-                           json={"phone": "0712345678", "password": "siri-kali"})
+                           json={"phone": "0712345678"})
     assert ok.status_code == 200
     assert ok.json()["access_token"]
     assert ok.json()["full_name"] == "Kieffer Madyedye"
 
-    wrong = await client.post("/auth/login",
-                              json={"phone": "0712345678", "password": "nope"})
-    assert wrong.status_code == 401
-
+    # Namba isiyojulikana → 401
     unknown = await client.post("/auth/login",
-                                json={"phone": "0755123456", "password": "x"})
+                                json={"phone": "0755123456"})
     assert unknown.status_code == 401
 
 
@@ -143,8 +141,9 @@ async def test_login_normalizes_international_phone(client, db):
     await db.cadres.insert_many(seed_cadres(db))
     await client.post("/auth/register", json=register_payload(phone_primary="+255712345678"))
 
+    # Phone-only login: +255 format
     res = await client.post("/auth/login",
-                            json={"phone": "+255712345678", "password": "siri-kali"})
+                            json={"phone": "+255712345678"})
     assert res.status_code == 200
 
 
@@ -154,18 +153,13 @@ async def test_login_with_alt_phone(client, db):
     await client.post("/auth/register", json=register_payload(
         phone_primary="0712345678", phone_alt="0623456789"))
 
-    # Login kupitia phone_alt inafanya kazi
+    # Login kupitia phone_alt inafanya kazi (bila password)
     res = await client.post("/auth/login",
-                            json={"phone": "0623456789", "password": "siri-kali"})
+                            json={"phone": "0623456789"})
     assert res.status_code == 200
     assert res.json()["access_token"]
     assert res.json()["full_name"] == "Kieffer Madyedye"
     assert res.json()["is_admin"] is False
-
-    # Password mbovu kwenye alt → 401
-    bad = await client.post("/auth/login",
-                            json={"phone": "0623456789", "password": "nope"})
-    assert bad.status_code == 401
 
 
 async def test_login_with_email_detects_admin_and_requires_2fa(client, db, monkeypatch):
@@ -254,31 +248,23 @@ async def test_full_password_reset_flow(client, db, monkeypatch):
     import app.modules.auth.routes as auth_routes
     monkeypatch.setattr(auth_routes.secrets, "randbelow", lambda n: 123456)
 
+    # Step 1: omba reset (auto-approved)
     sent = await client.post("/auth/forgot-password", json={"phone": "0712345678"})
     assert sent.status_code == 200
 
-    # Wrong code → rejected.
-    bad = await client.post("/auth/reset-password", json={
-        "phone": "0712345678", "code": "999999", "new_password": "new-siri",
-    })
-    assert bad.status_code == 400
-
-    # Correct code → password changed.
+    # Step 2: weka password mpya (bila code — auto-approved)
     good = await client.post("/auth/reset-password", json={
-        "phone": "0712345678", "code": "123456", "new_password": "new-siri",
+        "phone": "0712345678", "new_password": "new-siri",
     })
     assert good.status_code == 200
 
-    # Old password no longer works, new one does.
-    old_login = await client.post("/auth/login",
-                                  json={"phone": "0712345678", "password": "siri-kali"})
-    assert old_login.status_code == 401
-    new_login = await client.post("/auth/login",
-                                  json={"phone": "0712345678", "password": "new-siri"})
-    assert new_login.status_code == 200
+    # Namba ya simu bado inafanya kazi (login bila password)
+    login_ok = await client.post("/auth/login",
+                                 json={"phone": "0712345678"})
+    assert login_ok.status_code == 200
 
-    # Code is single-use.
+    # Reset ilikuwa single-use — reset ya pili hashipo
     reuse = await client.post("/auth/reset-password", json={
-        "phone": "0712345678", "code": "123456", "new_password": "another-pass",
+        "phone": "0712345678", "new_password": "another-pass",
     })
     assert reuse.status_code == 400
