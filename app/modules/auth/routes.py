@@ -128,24 +128,22 @@ async def register(body: RegisterRequest):
 async def login(body: LoginRequest):
     """Single login form: email auto-detected as ADMIN, phone as regular user.
 
-    Regular users can log in with EITHER phone (primary or alt). Admins must
-    use their verified email — a phone number never grants admin access.
-    Admin login now uses TWO-FACTOR AUTHENTICATION: correct email+password
-    issues an OTP that is emailed to the admin; the admin submits it via
-    `POST /auth/login/2fa` to receive the access token.
+    Regular users log in with EITHER phone (primary or alt) — bila password.
+    Admins use their verified email — OTP inatumwa kwa email, admin
+    anaingia code ya tarakimu 6 kupata access token.
     """
     identifier = (body.phone or "").strip()
     db = get_db()
 
-    # ── Email → admin login (2FA: password step first, OTP emailed next) ──
+    # ── Email → admin login (2FA: email tu, OTP inatumwa) ──
     if "@" in identifier:
         try:
             email = normalize_email(identifier)
         except ValueError as e:
             raise HTTPException(422, str(e))
         user = await db.users.find_one({"email": email})
-        if not user or not verify_password(body.password, user["password_hash"]):
-            raise HTTPException(401, "Email au password haiko sahihi")
+        if not user:
+            raise HTTPException(401, "Email hii haijapatikana kwenye mfumo")
         if not user.get("is_admin"):
             raise HTTPException(403, "Akaunti hii haina haki ya admin")
         if user.get("status") == "disabled":
