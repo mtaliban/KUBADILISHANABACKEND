@@ -26,7 +26,7 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=100)
     phone_primary: str
     phone_alt: Optional[str] = None
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str | None = None  # Hiari — login ni kwa namba ya simu tu
     category: str  # code ya idara (health/education au nyingine)
     cadre_code: str
     subjects: list[str] = Field(default_factory=list)

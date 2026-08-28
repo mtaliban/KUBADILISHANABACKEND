@@ -91,7 +91,7 @@ async def register(body: RegisterRequest):
     doc = {
         "full_name": body.full_name.strip(),
         "phone_primary": phone, "phone_alt": phone_alt,
-        "password_hash": hash_password(body.password),
+        "password_hash": hash_password(body.password) if body.password else None,
         "category": body.category, "cadre_code": body.cadre_code,
         "cadre_display": cadre["display_name"], "subjects": body.subjects,
         "current_station": body.current_station.model_dump(),
