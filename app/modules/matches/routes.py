@@ -106,8 +106,15 @@ async def stats(user=Depends(current_user)):
     }
 
 
-def _candidate_out(u: dict, score: float | None = None) -> dict:
+def _candidate_out(u: dict, score: float | None = None, my_station: dict | None = None) -> dict:
     """Grid card payload for the dashboard board."""
+    # Onyesha destination inayokuja kwako (si destination ya kwanza tu)
+    dests = u.get("desired_destinations", [])
+    matching_dest = None
+    if my_station:
+        my_rid = my_station.get("region_id")
+        if my_rid:
+            matching_dest = next((d for d in dests if d.get("region_id") == my_rid), None)
     return {
         "user_id": str(u["_id"]),
         "full_name": u["full_name"],
@@ -119,7 +126,8 @@ def _candidate_out(u: dict, score: float | None = None) -> dict:
         "subjects": u.get("subjects", []),
         "score": score,
         "current_station": u.get("current_station"),
-        "desired_destinations": u.get("desired_destinations", []),
+        "desired_destinations": dests,
+        "matching_destination": matching_dest,  # destination inayokuja kwako
         "online": ws_manager.is_online(str(u["_id"])),
         "created_at": u.get("created_at"),
     }
@@ -273,7 +281,7 @@ async def board(
                     if d.get("facility_id"): score = max(score, 1.0)
                     elif d.get("district_id"): score = max(score, 0.85)
                     else: score = max(score, 0.65)
-            c = _candidate_out(u, score)
+            c = _candidate_out(u, score, my_station)
             candidates.append(c)
     else:
         # Wote wa idara yangu (stats kamili — kada zote, sio kuchanganywa na idara nyingine)
