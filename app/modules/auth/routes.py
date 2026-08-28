@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,7 +16,7 @@ from ...events.topics import (
 )
 from .schemas import (
     RegisterRequest, RegisterResponse, LoginRequest, LoginResponse,
-    ForgotPasswordRequest, ResetPasswordRequest,
+    ForgotPasswordRequest, LookupByNameRequest, ResetPasswordRequest,
     AdminEmailLoginRequest, EmailVerifyRequest, EmailConfirmRequest,
     TwoFactorLoginRequest,
 )
@@ -224,6 +225,25 @@ async def me(user=Depends(current_user)):
     }
 
 
+@router.post("/lookup-by-name")
+async def lookup_by_name(body: LookupByNameRequest):
+    """Tafuta namba za simu kwa jina la mtumiaji.
+    Mtumiaji aliyesahau namba yake anaandika jina lake kamili,
+    mfumo unaonyesha namba zote zilizosajiliwa (primary + alt)."""
+    db = get_db()
+    name = body.full_name.strip()
+    users = []
+    async for u in db.users.find(
+        {"full_name": {"$regex": re.escape(name), "$options": "i"}},
+        {"full_name": 1, "phone_primary": 1, "phone_alt": 1, "category": 1, "cadre_code": 1, "cadre_display": 1},
+    ).limit(20):
+        u["_id"] = str(u["_id"])
+        users.append(u)
+    if not users:
+        raise HTTPException(404, "Hakuna mtumiaji aliye na jina hili kwenye mfumo")
+    return {"users": users}
+
+
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
     """
@@ -243,42 +263,27 @@ async def forgot_password(body: ForgotPasswordRequest):
     if user:
         code = f"{secrets.randbelow(1_000_000):06d}"
         now = datetime.now(timezone.utc)
+        # AUTO-APPROVE: haina haja ya admin kukubali — mtu anaporeset
+        # password, inakubaliwa moja kwa moja.
         await db.password_resets.update_one(
             {"user_id": user["_id"]}, {"$set": {
                 "user_id": user["_id"], "phone": phone,
                 "full_name": body.full_name or user.get("full_name", ""),
                 "code_hash": hash_password(code),
                 "expires_at": now + timedelta(minutes=RESET_CODE_TTL_MINUTES),
-                "created_at": now, "used": False, "status": "pending",
+                "created_at": now, "used": False, "status": "approved",
             }}, upsert=True,
         )
-        logger.warning(f"🔑 Password reset code for {phone} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
-        # user_id suffices for audit — phone is PII and already stored elsewhere.
+        logger.warning(f"🔑 Password reset (auto-approved) for {phone} ({user['full_name']}): {code}  (valid {RESET_CODE_TTL_MINUTES} min)")
+        # Log event — admin anaona kwenye events
         publish(TOPIC_USER_PASSWORD_RESET_REQUESTED, {
-            "event": "user.password_reset_requested", "user_id": str(user["_id"]),
+            "event": "user.password_reset_completed",
+            "user_id": str(user["_id"]),
+            "full_name": user.get("full_name", ""),
+            "phone": phone,
             "occurred_at": now.isoformat(),
         })
-        # REAL-TIME: notify admins via WS — ombi la password reset
-        from ..messaging.ws_manager import manager as ws_manager
-        notif_body = f"{user.get('full_name', '')} — {phone}"
-        admins = [str(a["_id"]) async for a in db.users.find({"is_admin": True}, {"_id": 1})]
-        for aid in admins:
-            ins = await db.notifications.insert_one({
-                "user_id": aid, "type": "password_reset.new",
-                "title": "Ombi la password reset",
-                "body": notif_body,
-                "data": {"user_id": str(user["_id"])},
-                "read": False, "created_at": now,
-            })
-            await ws_manager.send_to_user(aid, {
-                "event": "notification",
-                "type": "password_reset.new",
-                "title": "Ombi la password reset",
-                "body": notif_body,
-                "data": {"user_id": str(user["_id"])},
-                "occurred_at": now.isoformat(),
-            })
-    return {"ok": True, "message": f"Ombi la kubadilisha password limetumwa. Subiri admin akubali."}
+    return {"ok": True, "message": f"Umefanikiwa! Weka password mpya sasa."}
 
 
 @router.get("/password-reset/status")
@@ -312,35 +317,21 @@ async def reset_password(body: ResetPasswordRequest):
     rec = await db.password_resets.find_one({"user_id": user["_id"], "used": False})
     if not rec:
         raise HTTPException(400, "Ombi batili au limekwisha muda")
-    # Admin approved — user just sets new password (no code needed)
-    if rec.get("status") == "approved":
-        await db.users.update_one({"_id": user["_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
-        await db.password_resets.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
-        publish(TOPIC_USER_PASSWORD_RESET_COMPLETED, {
-            "event": "user.password_reset_completed", "user_id": str(user["_id"]),
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
-        })
-        logger.info(f"Password reset (admin-approved) for {phone}")
-        return {"ok": True, "message": "Password imebadilishwa. Ingia sasa."}
-    # Not yet approved — require SMS code
-    if not body.code:
-        raise HTTPException(400, "Ombi bado halijakubaliwa na admin")
-    # BSON/PyMongo inarudisha datetimes zisizo na tzinfo (naive UTC) —
-    # linganisha kwa utulivu kabla ya kufanya comparison.
+    # AUTO-APPROVE: password reset imekubaliwa moja kwa moja
     expires = rec["expires_at"]
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if expires < datetime.now(timezone.utc):
-        raise HTTPException(400, "Code imekwisha muda — omba mpya")
-    if not verify_password(body.code, rec["code_hash"]):
-        raise HTTPException(400, "Code batili au imekwisha muda")
+        raise HTTPException(400, "Ombi limekwisha muda — omba mpya")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
     await db.password_resets.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
     publish(TOPIC_USER_PASSWORD_RESET_COMPLETED, {
         "event": "user.password_reset_completed", "user_id": str(user["_id"]),
+        "full_name": user.get("full_name", ""),
+        "phone": phone,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     })
-    logger.info(f"Password reset for {phone}")
+    logger.info(f"Password reset (auto-approved) for {phone}")
     return {"ok": True, "message": "Password imebadilishwa. Ingia sasa."}
 
 

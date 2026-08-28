@@ -69,6 +69,10 @@ class ForgotPasswordRequest(BaseModel):
     full_name: str = Field(default="", max_length=100)
 
 
+class LookupByNameRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=100)
+
+
 class ResetPasswordRequest(BaseModel):
     phone: str
     code: str | None = Field(None, min_length=6, max_length=6)
