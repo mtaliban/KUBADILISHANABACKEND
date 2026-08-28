@@ -44,9 +44,13 @@ def test_register_request_rejects_short_name():
         RegisterRequest.model_validate(valid_payload(full_name="A"))
 
 
-def test_register_request_rejects_short_password():
-    with pytest.raises(ValidationError):
-        RegisterRequest.model_validate(valid_payload(password="123"))
+def test_register_request_accepts_optional_password():
+    # Password ni optional — login ni kwa namba ya simu tu
+    req = RegisterRequest.model_validate(valid_payload(password=None))
+    assert req.password is None
+    # Password yoyote inakubalika ikiwa imetolewa
+    req2 = RegisterRequest.model_validate(valid_payload(password="siri"))
+    assert req2.password == "siri"
 
 
 def test_register_request_accepts_custom_category():
