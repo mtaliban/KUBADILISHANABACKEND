@@ -187,6 +187,7 @@ class AdminCreateUser(BaseModel):
     current_station: dict | None = None
     desired_destinations: list[dict] = Field(default_factory=list)
     is_verified: bool = False
+    employment_sector: str | None = None
 
 
 @router.post("/users", status_code=201)
@@ -247,6 +248,7 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
         "category": body.category,
         "cadre_code": body.cadre_code, "cadre_display": cadre_display,
         "subjects": body.subjects,
+        "employment_sector": body.employment_sector,
         "current_station": body.current_station,
         "desired_destinations": body.desired_destinations,
         "status": body.status, "is_verified": body.is_verified,
@@ -271,6 +273,7 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
         "full_name": doc["full_name"], "phone_primary": phone,
         "email": email, "category": body.category, "cadre_code": body.cadre_code,
         "cadre_display": cadre_display, "subjects": body.subjects,
+        "employment_sector": body.employment_sector,
         "current_station": body.current_station,
         "desired_destinations": body.desired_destinations,
         "is_admin": body.is_admin,
@@ -863,6 +866,7 @@ class AdminUpdateUser(BaseModel):
     status: str | None = None
     is_verified: bool | None = None
     is_admin: bool | None = None
+    employment_sector: str | None = None
     new_password: str | None = Field(None, min_length=6)
 
 
