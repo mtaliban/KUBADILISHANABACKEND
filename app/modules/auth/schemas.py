@@ -28,6 +28,7 @@ class RegisterRequest(BaseModel):
     phone_alt: Optional[str] = None
     password: str | None = None  # Hiari — login ni kwa namba ya simu tu
     category: str  # code ya idara (health/education au nyingine)
+    employment_sector: Optional[str] = None  # 'wizara_afya' | 'tamisemi' — kwa afya tu
     cadre_code: str
     subjects: list[str] = Field(default_factory=list)
     current_station: StationInput
