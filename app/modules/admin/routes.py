@@ -1049,6 +1049,32 @@ async def admin_trash_purge_bulk(ids: list[str] = Query(...), _=Depends(current_
     return {"ok": True, "purged": purged}
 
 
+@router.post("/users/trash/restore")
+async def admin_trash_restore_bulk(ids: list[str] = Query(...), _=Depends(current_admin)):
+    """Rudisha watumiaji wengi wa trash kwa pamoja."""
+    db = get_db()
+    restored = 0
+    for uid in ids:
+        if not _is_valid_object_id(uid):
+            continue
+        oid = ObjectId(uid)
+        doc = await db.trash.find_one({"_id": oid})
+        if not doc:
+            continue
+        doc.pop("trashed_at", None); doc.pop("trashed_by", None)
+        doc.pop("_id", None)
+        await db.users.insert_one(doc)
+        await db.trash.delete_one({"_id": oid})
+        publish(TOPIC_USER_UPDATED_BY_ADMIN, {
+            "event": "user.updated_by_admin", "user_id": uid,
+            "changed_fields": ["restored"], "status": "active",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        })
+        restored += 1
+    await _bust_admin_caches()
+    return {"ok": True, "restored": restored}
+
+
 @router.delete("/users/{user_id}")
 async def admin_delete_user(user_id: str, admin=Depends(current_admin)):
     """Soft delete → akaunti inaenda TRASH (inaweza kurudishwa). Mtumiaji
