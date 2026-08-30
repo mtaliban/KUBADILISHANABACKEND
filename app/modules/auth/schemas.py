@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field, field_validator
 class StationInput(BaseModel):
     region_id: int
     region_name: str
-    district_id: int
-    district_name: str
+    district_id: Optional[int] = None   # Wizara ya Afya: hakuna wilaya
+    district_name: Optional[str] = None  # Wizara ya Afya: hakuna wilaya
     facility_id: Optional[str] = None
     facility_name: Optional[str] = None
     facility_type: Optional[str] = None

@@ -119,7 +119,7 @@ async def list_cadres(
         if category:
             q["category"] = category
         if sector:
-            q["sector"] = {"$in": [sector, None]}  # sector-specific au generic
+            q["sector"] = {"$in": [sector, "all"]}  # sector-specific au yote
         return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
     return await cached(key, _load)
 
