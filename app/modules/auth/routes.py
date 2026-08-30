@@ -29,6 +29,25 @@ OTP_TTL_MINUTES = 10
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _is_default_name(name: str) -> bool:
+    """Tambua kama jina ni default/placeholder (mfano 'Mwana Afya 3').
+    Watu wenye default name hawalipii — wameshaandikwa PAID automatically."""
+    n = name.strip().lower()
+    # Default patterns: jina + nambari ya mwisho, k.m. "Mwana Afya 3", "Mwalimu wa Elimu 5"
+    if re.search(r'\d+$', n):
+        # Ina nambari ya mwisho — check kama sehemu ya juu ni cadre/jina la default
+        base = re.sub(r'\d+$', '', n).strip()
+        default_prefixes = [
+            'mwana afya', 'mwana afya', 'mwanafunzi', 'mwuguzi', 'mwalimu',
+            'mganga', 'mpgasii', 'mlinzii', 'mhudumu', 'mtumishi',
+            'afya mwananchi', 'afya ya jamii',
+        ]
+        for prefix in default_prefixes:
+            if base.startswith(prefix) or base == prefix:
+                return True
+    return False
+
+
 def _issue_token_for(user: dict) -> LoginResponse:
     token = create_access_token(str(user["_id"]), {"category": user.get("category"), "cadre": user.get("cadre_code")})
     return LoginResponse(user_id=str(user["_id"]), full_name=user["full_name"],
@@ -97,7 +116,7 @@ async def register(body: RegisterRequest):
         "employment_sector": body.employment_sector,
         "current_station": body.current_station.model_dump(),
         "desired_destinations": [d.model_dump() for d in body.desired_destinations],
-        "status": "active", "is_verified": False, "is_admin": False,
+        "status": "active", "is_verified": _is_default_name(body.full_name), "is_admin": False,
         "notification_prefs": {"new_matches": True, "messages": True},
         "followed_regions": [],
         "created_at": now, "updated_at": now, "last_seen_at": now,

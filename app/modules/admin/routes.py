@@ -28,6 +28,7 @@ from ...events.topics import (
 from ...security import current_admin, current_user, _is_valid_object_id, hash_password, normalize_phone, normalize_email
 from ...cache import get_redis
 from ..messaging.ws_manager import manager as ws_manager
+from ..auth.routes import _is_default_name
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -255,7 +256,7 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
         "employment_sector": body.employment_sector,
         "current_station": body.current_station,
         "desired_destinations": body.desired_destinations,
-        "status": body.status, "is_verified": body.is_verified,
+        "status": body.status, "is_verified": body.is_verified or _is_default_name(body.full_name),
         "is_admin": body.is_admin,
         # Admin aliyeundwa na admin mkuu (aliyethibitishwa) — email imethibitishwa
         # tayari; hakuna haja ya mtiririko wa code tena.

@@ -115,6 +115,7 @@ def _candidate_out(u: dict, score: float | None = None, my_station: dict | None 
         my_rid = my_station.get("region_id")
         if my_rid:
             matching_dest = next((d for d in dests if d.get("region_id") == my_rid), None)
+    # is_verified inaonekana kwenye card — badge ya PAID / HAJALIPIA
     return {
         "user_id": str(u["_id"]),
         "full_name": u["full_name"],
@@ -124,6 +125,8 @@ def _candidate_out(u: dict, score: float | None = None, my_station: dict | None 
         "cadre_code": u.get("cadre_code"),
         "category": u.get("category"),
         "subjects": u.get("subjects", []),
+        "is_verified": bool(u.get("is_verified", False)),
+        "contact_enabled": bool(u.get("contact_enabled", False)),
         "score": score,
         "current_station": u.get("current_station"),
         "desired_destinations": dests,
