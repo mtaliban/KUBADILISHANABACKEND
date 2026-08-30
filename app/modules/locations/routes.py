@@ -106,10 +106,20 @@ async def list_departments():
 
 
 @router.get("/cadres")
-async def list_cadres(category: Optional[str] = Query(None)):
-    key = f"cadres:{category or 'all'}"
+async def list_cadres(
+    category: Optional[str] = Query(None),
+    sector: Optional[Literal["wizara_afya", "tamisemi"]] = Query(None),
+):
+    """Cadres — zinaload kutoka DB first time, kisha kutoka cache.
+    `sector` inatumika kwa afya tu: wizara_afya vs tamisemi.
+    Kwa sasa zote zina kada sawa, lakini sector inahifadhiwa kwa matumizi ya baadaye."""
+    key = f"cadres:{category or 'all'}:{sector or 'all'}"
     async def _load():
-        q = {"category": category} if category else {}
+        q = {}
+        if category:
+            q["category"] = category
+        if sector:
+            q["sector"] = {"$in": [sector, None]}  # sector-specific au generic
         return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
     return await cached(key, _load)
 
