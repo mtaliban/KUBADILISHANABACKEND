@@ -60,6 +60,7 @@ async def list_facilities_in_region(
     region_id: int,
     category: Literal["health", "education"] = Query(...),
     level: Optional[Literal["Primary", "Secondary"]] = Query(None),
+    sector: Optional[Literal["wizara_afya", "tamisemi"]] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(500, le=2000),
 ):
@@ -74,6 +75,11 @@ async def list_facilities_in_region(
     if not region: raise HTTPException(404, "Region not found")
     query = {"region": region["name"]}
     if q: query["name"] = {"$regex": _escape_regex(q), "$options": "i"}
+    # Sector filter: wizara_afya → referral hospitals only; tamisemi → non-referral
+    if sector == "wizara_afya":
+        query["type_category"] = {"$in": ["Hospitali ya Taifa (Rufaa)", "Hospitali ya Mkoa (Rufaa)"]}
+    elif sector == "tamisemi":
+        query["type_category"] = {"$in": ["Hospitali ya Wilaya", "Kituo cha Afya", "Zahanati (Dispensary)"]}
     cursor = db.health_facilities.find(query, {"_id": 0, "code": 1, "name": 1, "district": 1, "type": 1, "type_category": 1}).sort("name", 1).limit(limit)
     return [d async for d in cursor]
 
