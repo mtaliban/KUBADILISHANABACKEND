@@ -180,6 +180,14 @@ async def board(
                "_id": {"$ne": user["_id"]}}
     if not is_admin:
         q["category"] = my_category
+        # Wizara ya Afya: aone watu wa wizara yake TU
+        # TAMISEMI: aone WOTE (hakuna sector filter)
+        my_sector = user.get("employment_sector")
+        if my_category == "health" and my_sector == "wizara_afya":
+            q["$or"] = [
+                {"employment_sector": "wizara_afya"},
+                {"employment_sector": {"$exists": False}},  # old data bila sector
+            ]
     # Kichujio cha LEVEL kwa elimu: mwalimu wa msingi aone walimu wa msingi tu,
     # sio wa sekondari (na kinyume chake). Afya haina level filter.
     my_cadre = user.get("cadre_code")
