@@ -30,21 +30,38 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _is_default_name(name: str) -> bool:
-    """Tambua kama jina ni default/placeholder (mfano 'Mwana Afya 3').
+    """Tambua kama jina ni default/placeholder (mfano 'Mwana Afya 3', 'CO — 5').
     Watu wenye default name hawalipii — wameshaandikwa PAID automatically."""
     n = name.strip().lower()
-    # Default patterns: jina + nambari ya mwisho, k.m. "Mwana Afya 3", "Mwalimu wa Elimu 5"
+    # Pattern 1: jina + nambari ya mwisho, k.m. "Mwana Afya 3", "CO 5"
     if re.search(r'\d+$', n):
-        # Ina nambari ya mwisho — check kama sehemu ya juu ni cadre/jina la default
         base = re.sub(r'\d+$', '', n).strip()
         default_prefixes = [
-            'mwana afya', 'mwana afya', 'mwanafunzi', 'mwuguzi', 'mwalimu',
+            'mwana afya', 'mwanafunzi', 'mwuguzi', 'mwalimu',
             'mganga', 'mpgasii', 'mlinzii', 'mhudumu', 'mtumishi',
             'afya mwananchi', 'afya ya jamii',
         ]
         for prefix in default_prefixes:
             if base.startswith(prefix) or base == prefix:
                 return True
+    # Pattern 2: cadre code + "—" + nambari, k.m. "CO — 5", "RN — 3", "ANO — 12"
+    m = re.match(r'^([a-z]+)\s*[—–-]\s*\d+$', n)
+    if m:
+        cadre_prefixes = {
+            'co', 'rn', 'ano', 'no', 'en', 'ha', 'md', 'ca', 'aco',
+            'lab', 'pharm', 'dt', 'ot', 'ho', 'rad', 'physio',
+            'dent', 'n.o', 'h/a', 'm/a', 'r.n', 'c.o', 'e.n',
+        }
+        if m.group(1) in cadre_prefixes:
+            return True
+    # Pattern 3: majina ya default bila nambari — OR nyuzi zinazofanana sana
+    # Kama jina lina neno moja tu lenye <= 5 herufi SI jina halisi
+    # (mfano "CO", "RN" — ni cadre codes tu)
+    words = n.split()
+    if len(words) == 1 and len(words[0]) <= 3 and words[0] in {
+        'co', 'rn', 'ano', 'no', 'en', 'ha', 'md', 'ca',
+    }:
+        return True
     return False
 
 

@@ -1169,6 +1169,24 @@ async def admin_bulk_users(body: BulkUsersRequest, admin=Depends(current_admin))
             "skipped_admin": skipped, "total_requested": len(ids)}
 
 
+@router.post("/users/migrate-default-names")
+async def migrate_default_names(admin=Depends(current_admin)):
+    """Update ALL existing users with default/placeholder names to is_verified=true.
+    Hii inahakikisha watu wenye default names (mfano 'CO — 5', 'Mwana Afya 3')
+    wameshaandikwa PAID automatically — hawalipii."""
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    updated = 0
+    cursor = db.users.find({"is_verified": {"$ne": True}, "status": "active", "is_admin": {"$ne": True}})
+    async for u in cursor:
+        name = u.get("full_name", "")
+        if _is_default_name(name):
+            await db.users.update_one({"_id": u["_id"]}, {"$set": {"is_verified": True, "updated_at": now}})
+            updated += 1
+    await _bust_admin_caches()
+    return {"ok": True, "updated": updated, "message": f"Updated {updated} users with default names to PAID"}
+
+
 @router.post("/users/{user_id}/grant-admin")
 async def grant_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": True}})
