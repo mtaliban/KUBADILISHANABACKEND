@@ -12,11 +12,23 @@ def _escape_regex(q: str) -> str:
     return re.escape(q)
 
 
+# Valid Tanzania regions — safety filter to exclude test/dummy data (e.g. "JUMP")
+_VALID_REGIONS = {
+    "arusha", "coast", "dar es salaam", "dodoma", "geita", "iringa",
+    "kagera", "katavi", "kigoma", "kilimanjaro", "lindi", "manyara",
+    "mara", "mbeya", "morogoro", "mtwara", "mwanza", "njombe",
+    "rukwa", "ruvuma", "shinyanga", "simiyu", "singida", "songwe",
+    "tabora", "tanga",
+}
+
+
 @router.get("/locations/regions")
 async def list_regions():
     async def _load():
         cursor = get_db().regions.find({}, {"_id": 0}).sort("name", 1)
-        return [d async for d in cursor]
+        raw = [d async for d in cursor]
+        # Filter out test/dummy entries that slipped into the database
+        return [r for r in raw if r.get("name", "").strip().lower() in _VALID_REGIONS]
     return await cached("locations:regions", _load)
 
 
