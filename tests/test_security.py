@@ -284,6 +284,27 @@ async def test_wizara_afya_cannot_see_tamisemi(app_with_matches, db, client_with
     assert "Mtu 0767000051" not in names, "TAMISEMI user should not appear for Wizara ya Afya viewer"
 
 
+async def test_wizara_afya_cannot_see_old_users_without_sector(app_with_matches, db, client_with_matches):
+    """Wizara ya Afya user should NOT see old users who lack employment_sector."""
+    await _seed_cadres(db)
+    viewer = _user_doc("0767000056")
+    viewer["employment_sector"] = "wizara_afya"
+    viewer["current_station"]["region_id"] = 4
+    await db.users.insert_one(viewer)
+    vtok = create_access_token(str(viewer["_id"]))
+
+    # Old user WITHOUT employment_sector field (simulated — _user_doc has no sector)
+    old_user = _user_doc("0767000057")
+    old_user["desired_destinations"] = [{"region_id": 4, "region_name": "Dodoma"}]
+    await db.users.insert_one(old_user)
+
+    r = await client_with_matches.get("/matches/board", headers=_auth(vtok))
+    assert r.status_code == 200
+    data = r.json()
+    names = [c["full_name"] for c in data["candidates"]]
+    assert "Mtu 0767000057" not in names, "Old user without sector should not appear for Wizara ya Afya viewer"
+
+
 async def test_tamisemi_cannot_see_wizara_afya(app_with_matches, db, client_with_matches):
     """TAMISEMI user should NOT see Wizara ya Afya users on the board."""
     await _seed_cadres(db)

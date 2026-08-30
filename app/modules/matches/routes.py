@@ -187,11 +187,17 @@ async def board(
         # TAMISEMI: aone watu wa TAMISEMI TU
         # Hawachanganyiki — kila sector aone sector yake pekee
         my_sector = user.get("employment_sector")
-        if my_category == "health" and my_sector:
-            q["$or"] = [
-                {"employment_sector": my_sector},
-                {"employment_sector": {"$exists": False}},  # old data bila sector
-            ]
+        if my_category == "health":
+            if my_sector == "wizara_afya":
+                q["employment_sector"] = "wizara_afya"
+            elif my_sector == "tamisemi":
+                q["$or"] = [
+                    {"employment_sector": "tamisemi"},
+                    {"employment_sector": {"$exists": False}},  # old data bila sector
+                ]
+            else:
+                # Sector haijajulikana — onyesha wote (backup)
+                pass
     # Kichujio cha LEVEL kwa elimu: mwalimu wa msingi aone walimu wa msingi tu,
     # sio wa sekondari (na kinyume chake). Afya haina level filter.
     my_cadre = user.get("cadre_code")
