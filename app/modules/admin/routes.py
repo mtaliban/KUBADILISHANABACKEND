@@ -74,6 +74,10 @@ async def _bust_admin_caches() -> None:
         keys = [k async for k in r.scan_iter("admin:*")]
         if keys:
             await r.delete(*keys)
+        # Also bust locations cache (regions, districts, etc.)
+        loc_keys = [k async for k in r.scan_iter("locations:*")]
+        if loc_keys:
+            await r.delete(*loc_keys)
     except Exception:
         pass
 
