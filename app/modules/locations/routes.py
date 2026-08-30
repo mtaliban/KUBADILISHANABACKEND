@@ -119,7 +119,11 @@ async def list_cadres(
         if category:
             q["category"] = category
         if sector:
-            q["sector"] = {"$in": [sector, "all"]}  # sector-specific au yote
+            # sector-specific, "all" (shared), au records bila sector field (old data)
+            q["$or"] = [
+                {"sector": {"$in": [sector, "all"]}},
+                {"sector": {"$exists": False}},
+            ]
         return [d async for d in get_db().cadres.find(q, {"_id": 0}).sort("display_name", 1)]
     return await cached(key, _load)
 
