@@ -1201,6 +1201,17 @@ async def migrate_default_names(admin=Depends(current_admin)):
             "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3, removed {removed_depts.deleted_count} old departments"}
 
 
+@router.post("/departments/cleanup")
+async def cleanup_departments(admin=Depends(current_admin)):
+    """Futa departments zote isipokuwa Afya, Elimu, Watumishi wa Umma."""
+    db = get_db()
+    VALID = {'health', 'education', 'watumishi_wa_umma'}
+    result = await db.departments.delete_many({"code": {"$nin": list(VALID)}})
+    await _bust_admin_caches()
+    remaining = [d async for d in db.departments.find({}, {"_id": 0, "code": 1, "name": 1})]
+    return {"ok": True, "removed": result.deleted_count, "remaining": remaining}
+
+
 @router.post("/users/{user_id}/grant-admin")
 async def grant_admin(user_id: str, _=Depends(current_admin)):
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": True}})
