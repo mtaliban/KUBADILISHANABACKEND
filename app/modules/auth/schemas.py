@@ -22,6 +22,15 @@ class DestinationInput(BaseModel):
     notes: Optional[str] = Field(None, max_length=200)
 
 
+class CustomFacilityInput(BaseModel):
+    name: str
+    region_id: int
+    region_name: str
+    district_id: Optional[int] = None
+    district_name: Optional[str] = None
+    category: str
+
+
 class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=100)
     phone_primary: str
@@ -34,6 +43,7 @@ class RegisterRequest(BaseModel):
     years_of_service: Optional[int] = Field(None, ge=1, le=30, description='Miaka ya kazi — 1, 2, 3+ (3+ ina 3)')
     current_station: StationInput
     desired_destinations: list[DestinationInput] = Field(..., min_length=1, max_length=15)
+    custom_facilities: Optional[list[CustomFacilityInput]] = Field(None, description='Vituo vilivyoandikwa na mtumiaji (custom)')
 
     @field_validator("subjects")
     @classmethod

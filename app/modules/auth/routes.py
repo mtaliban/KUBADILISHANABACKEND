@@ -155,6 +155,44 @@ async def register(body: RegisterRequest):
         "occurred_at": now.isoformat(),
     })
 
+    # Auto-add custom facilities — mtumiaji aliandika kituo kisichopo
+    if body.custom_facilities:
+        for cf in body.custom_facilities:
+            name = cf.name.strip()
+            if not name:
+                continue
+            if cf.category == 'health':
+                # Check duplicate
+                existing = await db.health_facilities.find_one({"name": {"$regex": re.escape(name), "$options": "i"}})
+                if not existing:
+                    region = await db.regions.find_one({"id": cf.region_id}, {"_id": 0, "name": 1})
+                    district_name = cf.district_name or ''
+                    doc_cf = {
+                        "name": name,
+                        "region": region["name"] if region else cf.region_name,
+                        "district": district_name,
+                        "type": "user_suggested",
+                        "suggested_by": uid,
+                        "suggested_at": now,
+                        "status": "pending",  # admin lazima a approve
+                    }
+                    await db.health_facilities.insert_one(doc_cf)
+            else:
+                existing = await db.schools.find_one({"name": {"$regex": re.escape(name), "$options": "i"}})
+                if not existing:
+                    region = await db.regions.find_one({"id": cf.region_id}, {"_id": 0, "name": 1})
+                    district_name = cf.district_name or ''
+                    doc_cf = {
+                        "name": name,
+                        "region": region["name"] if region else cf.region_name,
+                        "district": district_name,
+                        "category": cf.category,
+                        "suggested_by": uid,
+                        "suggested_at": now,
+                        "status": "pending",
+                    }
+                    await db.schools.insert_one(doc_cf)
+
     token = create_access_token(uid, {"category": body.category, "cadre": body.cadre_code})
     return RegisterResponse(user_id=uid, full_name=doc["full_name"], phone_primary=phone,
                             category=body.category, cadre_code=body.cadre_code, access_token=token)
