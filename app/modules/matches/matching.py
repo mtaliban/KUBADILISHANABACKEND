@@ -1,5 +1,6 @@
 """Reverse-matching: A ↔ B iff same category+cadre, subjects overlap (if any),
 and both stations satisfy at least one of the other's desired destinations."""
+from datetime import datetime, timezone
 from typing import Iterable
 
 
@@ -74,4 +75,24 @@ async def find_matches_for_user(db, user: dict) -> list[dict]:
                 },
             })
     out.sort(key=lambda m: m["score"], reverse=True)
+    # AUTO-STORE: hifadhi match za kweli kwenye matches collection
+    # ili zionekane kwenye /matches/me/cached na zihifadhiwe kwa muda mrefu
+    uid = str(user["_id"])
+    for m in out:
+        a_id, b_id = m["user_a_id"], m["user_b_id"]
+        existing = await db.matches.find_one({
+            "$or": [
+                {"user_a_id": a_id, "user_b_id": b_id},
+                {"user_a_id": b_id, "user_b_id": a_id},
+            ]
+        })
+        if not existing:
+            await db.matches.insert_one({
+                "user_a_id": a_id, "user_b_id": b_id,
+                "score": m["score"], "status": "new",
+                "matched_at": datetime.now(timezone.utc),
+            })
+        elif existing.get("score", 0) < m["score"]:
+            # Score bora — sasisha
+            await db.matches.update_one({"_id": existing["_id"]}, {"$set": {"score": m["score"]}})
     return out

@@ -81,6 +81,61 @@ async def my_matches(user=Depends(current_user),
     return {"total": len(matches), "filtered": len(f), "matches": f[:limit]}
 
 
+@router.get("/true")
+async def true_matches(user=Depends(current_user), limit: int = Query(50, le=200)):
+    """Match za KWELI — reciprocal matches tu.
+    A↔B: A anataka kuja mkoa wa B NA B anataka kuja mkoa wa A.
+    Zote lazima ziwe na score > 0 na zimetokana na match_score() halisi."""
+    db = get_db()
+    matches = await find_matches_for_user(db, user)
+    uid = str(user["_id"])
+    # Tumia matches zilizohifadhiwa — zaidi ya hizo, pata realtime
+    stored = []
+    async for m in db.matches.find({
+        "$or": [{"user_a_id": uid}, {"user_b_id": uid}],
+        "score": {"$gt": 0},
+    }).sort("score", -1).limit(limit):
+        other_id = m["user_b_id"] if m["user_a_id"] == uid else m["user_a_id"]
+        other = await db.users.find_one({"_id": ObjectId(other_id)}, {"password_hash": 0})
+        if not other or other.get("status") != "active":
+            continue
+        # Verify — je kweli A↔B? (Hii ndiyo security check)
+        s = match_score(user, other)
+        if s <= 0:
+            continue
+        st = other.get("current_station") or {}
+        dests = other.get("desired_destinations", [])
+        # Pata destination inayokuja kwako
+        my_station = user.get("current_station") or {}
+        matching_dest = None
+        for d in dests:
+            if _any_in_region(my_station, [d]):
+                matching_dest = d
+                break
+        stored.append({
+            "user_id": str(other["_id"]),
+            "full_name": other["full_name"],
+            "phone_primary": other.get("phone_primary"),
+            "phone_alt": other.get("phone_alt"),
+            "cadre_code": other.get("cadre_code"),
+            "cadre_display": other.get("cadre_display"),
+            "category": other.get("category"),
+            "subjects": other.get("subjects", []),
+            "current_station": st,
+            "desired_destinations": dests,
+            "matching_destination": matching_dest,
+            "score": s,
+            "is_verified": bool(other.get("is_verified")),
+            "contact_enabled": bool(other.get("contact_enabled")),
+            "years_of_service": other.get("years_of_service"),
+            "employment_sector": other.get("employment_sector"),
+            "online": ws_manager.is_online(str(other["_id"])),
+            "matched_at": m.get("matched_at"),
+        })
+    stored.sort(key=lambda x: x["score"], reverse=True)
+    return {"total": len(stored), "matches": stored}
+
+
 @router.get("/stats")
 async def stats(user=Depends(current_user)):
     matches = await find_matches_for_user(get_db(), user)
