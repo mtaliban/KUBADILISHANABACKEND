@@ -107,18 +107,17 @@ async def list_departments():
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
         {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
     ]
-    inserted_any = False
+    VALID_CODES = {d["code"] for d in defaults}
+    await db.departments.delete_many({"code": {"$nin": list(VALID_CODES)}})
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
             await db.departments.insert_one(dict(d))
-            inserted_any = True
-    if inserted_any:
-        try:
-            from ...cache import get_redis
-            r = get_redis()
-            await r.delete("locations:departments", "admin:data:departments")
-        except Exception:
-            pass
+    try:
+        from ...cache import get_redis
+        r = get_redis()
+        await r.delete("locations:departments", "admin:data:departments")
+    except Exception:
+        pass
     key = "locations:departments"
     async def _load():
         q = {"status": "active"}

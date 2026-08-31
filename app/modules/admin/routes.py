@@ -1550,6 +1550,9 @@ async def _ensure_default_departments(db) -> None:
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
         {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
     ]
+    VALID_CODES = {d["code"] for d in defaults}
+    # Futa departments zilizoondolewa kabla ya kuongeza mpya
+    await db.departments.delete_many({"code": {"$nin": list(VALID_CODES)}})
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
             await db.departments.insert_one(dict(d))
