@@ -745,6 +745,7 @@ async def incoming_users(_=Depends(current_admin),
           "subjects": 1, "current_station": 1, "desired_destinations": 1,
           "created_at": 1, "last_seen_at": 1, "is_online": 1,
           "is_verified": 1, "contact_enabled": 1, "status": 1,
+          "years_of_service": 1, "employment_sector": 1,
       }).sort("created_at", -1).limit(limit)
       users = []
       async for u in cur:
@@ -772,6 +773,7 @@ async def incoming_users(_=Depends(current_admin),
               "online": bool(u.get("is_online")),
               "is_verified": bool(u.get("is_verified")),
               "contact_enabled": bool(u.get("contact_enabled")),
+              "years_of_service": u.get("years_of_service"),
           })
       return {"total": total, "region_id": region_id, "users": users}
     except Exception as e:
