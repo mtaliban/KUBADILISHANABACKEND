@@ -1192,9 +1192,13 @@ async def migrate_default_names(admin=Depends(current_admin)):
     async for u in cursor2:
         await db.users.update_one({"_id": u["_id"]}, {"$set": {"years_of_service": 3, "updated_at": now}})
         updated_years += 1
+    # 3. Ondoa departments zilizoondolewa — acha tu Afya, Elimu, Watumishi wa Umma
+    VALID_DEPTS = {'health', 'education', 'watumishi_wa_umma'}
+    removed_depts = await db.departments.delete_many({"code": {"$nin": list(VALID_DEPTS)}})
     await _bust_admin_caches()
     return {"ok": True, "updated": updated, "updated_years": updated_years,
-            "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3"}
+            "removed_depts": removed_depts.deleted_count,
+            "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3, removed {removed_depts.deleted_count} old departments"}
 
 
 @router.post("/users/{user_id}/grant-admin")
@@ -1531,19 +1535,9 @@ async def _ensure_default_departments(db) -> None:
     """Hakikisha idara za msingi zipo — kila department mpya inaongezwa automatically.
     Hivyo tab ya Idara huwa ina data hata kwenye mfumo mpya."""
     defaults = [
-        # Zilizopo database tayari — hakikisha zipo
         {"code": "health", "name": "Afya", "status": "active", "icon": None},
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
-        {"code": "afisa_kilimo", "name": "Afisa Kilimo", "status": "active", "icon": None},
         {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
-        # Mpya — zitaongezwa automatically
-        {"code": "water", "name": "Maji", "status": "active", "icon": None},
-        {"code": "works", "name": "Miundombinu", "status": "active", "icon": None},
-        {"code": "livestock", "name": "Mifugo", "status": "active", "icon": None},
-        {"code": "community", "name": "Maendeleo ya Jamii", "status": "active", "icon": None},
-        {"code": "finance", "name": "Fedha na Uchumi", "status": "active", "icon": None},
-        {"code": "administration", "name": "Utawala", "status": "active", "icon": None},
-        {"code": "ict", "name": "TEHAMA (ICT)", "status": "active", "icon": None},
     ]
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
