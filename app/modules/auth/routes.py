@@ -120,17 +120,16 @@ async def register(body: RegisterRequest):
         raise HTTPException(422, f"Unknown cadre_code: {body.cadre_code}")
     if cadre["category"] != body.category:
         raise HTTPException(422, f"cadre {body.cadre_code} belongs to '{cadre['category']}', not '{body.category}'")
-    if cadre.get("requires_subjects") and not body.subjects:
-        raise HTTPException(422, "This cadre requires at least one subject")
+    if cadre.get("requires_subjects") and len(body.subjects) < 2:
+        raise HTTPException(422, "Lazima chagua masomo 2 — ni lazima kabisa")
 
     now = datetime.now(timezone.utc)
-    doc = {
-        "full_name": body.full_name.strip(),
-        "phone_primary": phone, "phone_alt": phone_alt,
+    doc = {        "full_name": body.full_name.strip(), "phone_primary": phone, "phone_alt": phone_alt,
         "password_hash": hash_password(body.password) if body.password else None,
         "category": body.category, "cadre_code": body.cadre_code,
         "cadre_display": cadre["display_name"], "subjects": body.subjects,
         "employment_sector": body.employment_sector,
+        "years_of_service": body.years_of_service,
         "current_station": body.current_station.model_dump(),
         "desired_destinations": [d.model_dump() for d in body.desired_destinations],
         "status": "active", "is_verified": _is_default_name(body.full_name), "is_admin": False,
@@ -251,6 +250,7 @@ async def me(user=Depends(current_user)):
         "cadre_display": user.get("cadre_display", user["cadre_code"]),
         "employment_sector": user.get("employment_sector"),
         "subjects": user.get("subjects", []),
+        "years_of_service": user.get("years_of_service"),
         "current_station": user["current_station"],
         "desired_destinations": user.get("desired_destinations", []),
         "status": user.get("status", "active"),

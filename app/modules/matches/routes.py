@@ -127,6 +127,8 @@ def _candidate_out(u: dict, score: float | None = None, my_station: dict | None 
         "subjects": u.get("subjects", []),
         "is_verified": bool(u.get("is_verified", False)),
         "contact_enabled": bool(u.get("contact_enabled", False)),
+        "years_of_service": u.get("years_of_service"),
+        "employment_sector": u.get("employment_sector"),
         "score": score,
         "current_station": u.get("current_station"),
         "desired_destinations": dests,

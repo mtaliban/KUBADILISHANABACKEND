@@ -31,6 +31,7 @@ class RegisterRequest(BaseModel):
     employment_sector: Optional[str] = None  # 'wizara_afya' | 'tamisemi' — kwa afya tu
     cadre_code: str
     subjects: list[str] = Field(default_factory=list)
+    years_of_service: Optional[int] = Field(None, ge=1, le=30, description='Miaka ya kazi — 1, 2, 3+ (3+ ina 3)')
     current_station: StationInput
     desired_destinations: list[DestinationInput] = Field(..., min_length=1, max_length=15)
 

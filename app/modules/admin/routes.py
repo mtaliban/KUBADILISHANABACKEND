@@ -1177,14 +1177,22 @@ async def migrate_default_names(admin=Depends(current_admin)):
     db = get_db()
     now = datetime.now(timezone.utc)
     updated = 0
+    updated_years = 0
+    # 1. Default names → is_verified = True (PAID)
     cursor = db.users.find({"is_verified": {"$ne": True}, "status": "active", "is_admin": {"$ne": True}})
     async for u in cursor:
         name = u.get("full_name", "")
         if _is_default_name(name):
             await db.users.update_one({"_id": u["_id"]}, {"$set": {"is_verified": True, "updated_at": now}})
             updated += 1
+    # 2. Old users bila years_of_service → set 3 (miaka 3+)
+    cursor2 = db.users.find({"years_of_service": {"$exists": False}, "status": "active"})
+    async for u in cursor2:
+        await db.users.update_one({"_id": u["_id"]}, {"$set": {"years_of_service": 3, "updated_at": now}})
+        updated_years += 1
     await _bust_admin_caches()
-    return {"ok": True, "updated": updated, "message": f"Updated {updated} users with default names to PAID"}
+    return {"ok": True, "updated": updated, "updated_years": updated_years,
+            "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3"}
 
 
 @router.post("/users/{user_id}/grant-admin")
@@ -1523,8 +1531,16 @@ async def _ensure_default_departments(db) -> None:
     if await db.departments.count_documents({}):
         return
     defaults = [
-        {"code": "health", "name": "Afya", "status": "active", "icon": "🏥"},
-        {"code": "education", "name": "Elimu", "status": "active", "icon": "🏫"},
+        {"code": "health", "name": "Afya", "status": "active", "icon": None},
+        {"code": "education", "name": "Elimu", "status": "active", "icon": None},
+        {"code": "water", "name": "Maji", "status": "active", "icon": None},
+        {"code": "agriculture", "name": "Kilimo", "status": "active", "icon": None},
+        {"code": "works", "name": "Miundombinu", "status": "active", "icon": None},
+        {"code": "livestock", "name": "Mifugo", "status": "active", "icon": None},
+        {"code": "community", "name": "Maendeleo ya Jamii", "status": "active", "icon": None},
+        {"code": "finance", "name": "Fedha na Uchumi", "status": "active", "icon": None},
+        {"code": "administration", "name": "Utawala", "status": "active", "icon": None},
+        {"code": "ict", "name": "TEHAMA (ICT)", "status": "active", "icon": None},
     ]
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
