@@ -1825,13 +1825,17 @@ async def data_facilities(_=Depends(current_admin),
         if district_id: qd["district_id"] = district_id
         cursor = db.schools.find(qd, {"_id": 0}).sort("name", 1).limit(limit)
         return {"category": "education", "items": [d async for d in cursor]}
-    # Afya: wilaya/mkoa vimehifadhiwa kwa JINA → map id→jina kwa kuchuja.
+    # Afya: wilaya/mkoa vimehifadhiwa kwa JINA — tumia $in kwa field nyingi + case-insensitive
     if district_id:
         district = await db.districts.find_one({"id": district_id}, {"_id": 0, "name": 1})
-        if district: qd["district"] = district["name"]
+        if district:
+            dn = re.compile(re.escape(district["name"]), re.IGNORECASE)
+            qd["$or"] = [{"district": dn}, {"district_name": dn}]
     elif region_id:
         region = await db.regions.find_one({"id": region_id}, {"_id": 0, "name": 1})
-        if region: qd["region"] = region["name"]
+        if region:
+            rn = re.compile(re.escape(region["name"]), re.IGNORECASE)
+            qd["$or"] = [{"region": rn}, {"region_name": rn}]
     cursor = db.health_facilities.find(qd, {"_id": 0}).sort("name", 1).limit(limit)
     return {"category": "health", "items": [d async for d in cursor]}
 
