@@ -1712,7 +1712,13 @@ async def data_cadres_delete(code: str, admin=Depends(current_admin)):
 
 @router.get("/data/regions")
 async def data_regions(_=Depends(current_admin)):
-    return [d async for d in get_db().regions.find({}, {"_id": 0}).sort("name", 1)]
+    cache_key = "admin:data:regions"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    result = [d async for d in get_db().regions.find({}, {"_id": 0}).sort("name", 1)]
+    await _cache_set(cache_key, result, 300)
+    return result
 
 
 @router.post("/data/regions")
@@ -1751,8 +1757,14 @@ async def data_regions_delete(region_id: int, admin=Depends(current_admin)):
 
 @router.get("/data/districts")
 async def data_districts(_=Depends(current_admin), region_id: Optional[int] = None):
+    cache_key = f"admin:data:districts:{region_id or 'all'}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
     q = {"region_id": region_id} if region_id else {}
-    return [d async for d in get_db().districts.find(q, {"_id": 0}).sort("name", 1)]
+    result = [d async for d in get_db().districts.find(q, {"_id": 0}).sort("name", 1)]
+    await _cache_set(cache_key, result, 300)
+    return result
 
 
 @router.post("/data/districts")
