@@ -100,16 +100,35 @@ async def list_facilities_in_region(
 async def list_departments():
     """Idara zote ACTIVE (kwa usajili na dropdown) — idara zilizositishwa
     hazionekani kwa watumiaji (suspend ya idara)."""
-    # Hakikisha idara za msingi (Afya + Elimu) zipo hata kabla admin hajaingia.
+    # Hakikisha idara za msingi zipo — kila mpya inaongezwa automatically
     db = get_db()
-    if not await db.departments.count_documents({}):
-        defaults = [
-            {"code": "health", "name": "Afya", "status": "active", "icon": "🏥"},
-            {"code": "education", "name": "Elimu", "status": "active", "icon": "🏫"},
-        ]
-        for d in defaults:
-            if not await db.departments.find_one({"code": d["code"]}):
-                await db.departments.insert_one(dict(d))
+    defaults = [
+        # Zilizopo database tayari
+        {"code": "health", "name": "Afya", "status": "active", "icon": None},
+        {"code": "education", "name": "Elimu", "status": "active", "icon": None},
+        {"code": "afisa_kilimo", "name": "Afisa Kilimo", "status": "active", "icon": None},
+        {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
+        # Mpya
+        {"code": "water", "name": "Maji", "status": "active", "icon": None},
+        {"code": "works", "name": "Miundombinu", "status": "active", "icon": None},
+        {"code": "livestock", "name": "Mifugo", "status": "active", "icon": None},
+        {"code": "community", "name": "Maendeleo ya Jamii", "status": "active", "icon": None},
+        {"code": "finance", "name": "Fedha na Uchumi", "status": "active", "icon": None},
+        {"code": "administration", "name": "Utawala", "status": "active", "icon": None},
+        {"code": "ict", "name": "TEHAMA (ICT)", "status": "active", "icon": None},
+    ]
+    inserted_any = False
+    for d in defaults:
+        if not await db.departments.find_one({"code": d["code"]}):
+            await db.departments.insert_one(dict(d))
+            inserted_any = True
+    if inserted_any:
+        try:
+            from ...cache import get_redis
+            r = get_redis()
+            await r.delete("locations:departments", "admin:data:departments")
+        except Exception:
+            pass
     key = "locations:departments"
     async def _load():
         q = {"status": "active"}

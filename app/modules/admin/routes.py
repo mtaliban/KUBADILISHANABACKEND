@@ -1526,15 +1526,16 @@ async def _next_id(db, collection: str) -> int:
 
 
 async def _ensure_default_departments(db) -> None:
-    """Hakikisha idara za msingi (Afya + Elimu) zipo — zikiwa hazipo, ingiza.
+    """Hakikisha idara za msingi zipo — kila department mpya inaongezwa automatically.
     Hivyo tab ya Idara huwa ina data hata kwenye mfumo mpya."""
-    if await db.departments.count_documents({}):
-        return
     defaults = [
+        # Zilizopo database tayari — hakikisha zipo
         {"code": "health", "name": "Afya", "status": "active", "icon": None},
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
+        {"code": "afisa_kilimo", "name": "Afisa Kilimo", "status": "active", "icon": None},
+        {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
+        # Mpya — zitaongezwa automatically
         {"code": "water", "name": "Maji", "status": "active", "icon": None},
-        {"code": "agriculture", "name": "Kilimo", "status": "active", "icon": None},
         {"code": "works", "name": "Miundombinu", "status": "active", "icon": None},
         {"code": "livestock", "name": "Mifugo", "status": "active", "icon": None},
         {"code": "community", "name": "Maendeleo ya Jamii", "status": "active", "icon": None},
