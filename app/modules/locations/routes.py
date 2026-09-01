@@ -16,6 +16,26 @@ def _escape_regex(q: str) -> str:
 # mikoa kupitia Data Management. Mikoa yote ya DB inaonyeshwa kama ilivyo.
 
 
+@router.get("/locations/data-version")
+async def data_version():
+    """Return a lightweight version hash for all reference data collections.
+    Frontend (registration / unauthenticated pages) polls this to detect changes
+    without fetching full datasets. Changes when admin mutates any data."""
+    import hashlib, json
+    db = get_db()
+    counts = {}
+    for col in ["regions", "districts", "facilities", "departments", "cadres", "subjects"]:
+        counts[col] = await db[col].count_documents({})
+    # include latest modified timestamp from admin audit if available
+    try:
+        last = await db.events.find_one({}, sort=[("ts", -1)])
+        counts["_ts"] = str(last.get("ts", "")) if last else ""
+    except Exception:
+        counts["_ts"] = ""
+    h = hashlib.md5(json.dumps(counts, sort_keys=True).encode()).hexdigest()[:12]
+    return {"version": h, **counts}
+
+
 @router.get("/locations/regions")
 async def list_regions():
     async def _load():
