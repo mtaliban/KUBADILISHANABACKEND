@@ -484,6 +484,16 @@ def _on_message(client, userdata, msg):
     except Exception as e:
         logger.exception(f"log_event failed: {e}")
 
+    # 1b) CACHE BUST FIRST — futa Redis cache kabla ya kutuma WS events.
+    #     Sababu: watumiaji wanapokea `data.changed` WS na mara moja wanafanya
+    #     fetch fresh data — kama cache bado iko, wanapata data ya zamani!
+    #     Kwa hivyo cache lazima ibadilishe kabla ya kuwapelekea taarifa.
+    if msg.topic.startswith("kv/data/"):
+        try:
+            _bust_data_caches()
+        except Exception as e:
+            logger.debug(f"data cache bust failed (non-critical): {e}")
+
     # 2) matching triggers (incl. admin edits — fixes matches never recomputing
     #    when an admin changed station/destinations directly)
     if msg.topic in (TOPIC_USER_REGISTERED, TOPIC_USER_DESTINATION_CHANGED,
@@ -516,13 +526,8 @@ def _on_message(client, userdata, msg):
         except Exception as e:
             logger.exception(f"WS fanout failed: {e}")
 
-    # 5) cache invalidation — data changed (departments/subjects/cadres/regions/districts)
-    #    BUST caches ili frontend zote zipate data mpya papo hapo bila refresh.
-    if msg.topic.startswith("kv/data/"):
-        try:
-            _bust_data_caches()
-        except Exception as e:
-            logger.debug(f"data cache bust failed: {e}")
+    # NOTE: data cache bust (kv/data/*) moved to STEP 1b — must bust BEFORE
+    # sending WS events to avoid race where users fetch stale Redis data.
 
 
 def start_subscriber() -> mqtt.Client:
