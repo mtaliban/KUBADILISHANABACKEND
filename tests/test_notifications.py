@@ -49,6 +49,13 @@ def app(db, monkeypatch):
     for mod in _DB_MODULES:
         monkeypatch.setattr(mod, "get_db", lambda: db)
     monkeypatch.setattr(security, "get_db", lambda: db)
+
+    # Bypass Redis cache in tests
+    import app.cache as _cache_mod
+    async def _fake_cached(key, loader, ttl=None):
+        return await loader()
+    monkeypatch.setattr(_cache_mod, "cached", _fake_cached)
+
     return application
 
 
