@@ -317,6 +317,8 @@ async def admin_import_users_excel(
     **Afya (health) & Utumishi (service)** — columns sawa lakini cadre
     ni ya afya/utumishi (k.m. CO, RN, EN, HA…).  Kiwango si lazima.
 
+    Column 15: Miaka ya Kazi (hiari) — integer 1-30.  Kama siwalami, 3+ inatumika.
+
     Kaunta ya ushindi (created) na makosa (errors) inarudishwa.
     """
     import io, secrets, string
@@ -387,7 +389,7 @@ async def admin_import_users_excel(
     for idx, row in enumerate(rows, start=2):
         try:
             # Unpack — safely handle short rows
-            vals = [str(c).strip() if c is not None else "" for c in (list(row) + [None] * 14)[:14]]
+            vals = [str(c).strip() if c is not None else "" for c in (list(row) + [None] * 15)[:15]]
             full_name = vals[0]
             phone_normal = vals[1]
             phone_whatsapp = vals[2] or None
@@ -402,6 +404,14 @@ async def admin_import_users_excel(
             dest_districts1_str = vals[11] or None
             dest_region2_name = vals[12] or None
             dest_districts2_str = vals[13] or None
+            # Column 15: Miaka ya Kazi (hiari)
+            years_raw = vals[14] if len(vals) > 14 else ""
+            years_of_service = None
+            if years_raw:
+                try:
+                    years_of_service = min(30, max(1, int(float(years_raw))))
+                except (ValueError, TypeError):
+                    pass
 
             # Validate required fields
             if not full_name or not phone_normal or not cadre_code or not region_name or not district_name:
@@ -502,6 +512,7 @@ async def admin_import_users_excel(
                 "email_verified": False,
                 "notification_prefs": {"new_matches": True, "messages": True},
                 "followed_regions": [],
+                "years_of_service": years_of_service,
                 "created_at": now,
                 "updated_at": now,
                 "last_seen_at": now,
@@ -561,6 +572,7 @@ async def admin_import_template(category: str = Query(...), _=Depends(current_ad
         "Wilaya za Lengo 1",
         "Mkoa wa Lengo 2",
         "Wilaya za Lengo 2",
+        "Miaka ya Kazi",
     ]
 
     # Example row
@@ -580,6 +592,7 @@ async def admin_import_template(category: str = Query(...), _=Depends(current_ad
             "Kinondoni, Temeke",
             "Arusha",
             "Arusha",
+            3,
         ]
     elif category == "health":
         example = [
@@ -597,6 +610,7 @@ async def admin_import_template(category: str = Query(...), _=Depends(current_ad
             "Ilala",
             "",
             "",
+            5,
         ]
     else:  # service
         example = [
@@ -614,6 +628,7 @@ async def admin_import_template(category: str = Query(...), _=Depends(current_ad
             "Dodoma Mjini",
             "",
             "",
+            2,
         ]
 
     header_font = Font(bold=True, color="FFFFFF", size=11)
