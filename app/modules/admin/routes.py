@@ -11,7 +11,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 from typing import Optional, Literal
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -287,6 +287,368 @@ async def admin_create_user(body: AdminCreateUser, _=Depends(current_admin)):
     fresh = await db.users.find_one({"_id": result.inserted_id}, {"password_hash": 0})
     fresh["_id"] = uid
     return fresh
+
+
+# ─── BULK IMPORT FROM EXCEL ─────────────────────────────────────────────────
+@router.post("/users/import", status_code=201)
+async def admin_import_users_excel(
+    file: "UploadFile",
+    category: str = Query(..., description="health | education | service"),
+    _=Depends(current_admin),
+):
+    """Upload an Excel (.xlsx) file to create many users at once.
+
+    **Elimu (education) columns:**
+    1. Jina Kamili
+    2. Simu ya Kawaida
+    3. Simu ya WhatsApp (hiari)
+    4. Kada (cadre_code — k.m. P1, P2, S1, S2…)
+    5. Kiwango (Primary | Secondary)
+    6. Somo 1 (hiari)
+    7. Somo 2 (hiari)
+    8. Mkoa wa Sasa (jina la mkoa)
+    9. Wilaya (jina la wilaya)
+    10. Shule / Kituo (hiari)
+    11. Mkoa wa Lengo 1
+    12. Wilaya za Lengo 1 (kwa koma)
+    13. Mkoa wa Lengo 2 (hiari)
+    14. Wilaya za Lengo 2 (kwa koma, hiari)
+
+    **Afya (health) & Utumishi (service)** — columns sawa lakini cadre
+    ni ya afya/utumishi (k.m. CO, RN, EN, HA…).  Kiwango si lazima.
+
+    Kaunta ya ushindi (created) na makosa (errors) inarudishwa.
+    """
+    import io, secrets, string
+    from openpyxl import load_workbook
+
+    if category not in ("health", "education", "service"):
+        raise HTTPException(422, "category lazima iwe health, education, au service")
+
+    # Read uploaded file into memory
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(422, "Faili hii ni tupu")
+
+    try:
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(422, "Faili si Excel (.xlsx) sahihi")
+
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))  # skip header
+    if not rows:
+        raise HTTPException(422, "Hakuna data ndani ya faili (angalia header bar)")
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    created = 0
+    skipped = 0
+    errors: list[dict] = []
+
+    def _gen_password(length: int = 8) -> str:
+        alphabet = string.ascii_letters + string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    async def _resolve_region(name: str) -> dict | None:
+        if not name:
+            return None
+        name_clean = str(name).strip()
+        r = await db.regions.find_one({"name": {"$regex": re.escape(name_clean), "$options": "i"}})
+        if r:
+            return {"region_id": r["id"], "region_name": r["name"]}
+        return None
+
+    async def _resolve_district(region_id: int, name: str) -> dict | None:
+        if not name:
+            return None
+        name_clean = str(name).strip()
+        d = await db.districts.find_one({
+            "region_id": region_id,
+            "name": {"$regex": re.escape(name_clean), "$options": "i"}
+        })
+        if d:
+            return {"district_id": d["id"], "district_name": d["name"]}
+        return None
+
+    async def _resolve_facility(district_id: int, name: str) -> dict | None:
+        if not name:
+            return None
+        name_clean = str(name).strip()
+        cat = "education" if category == "education" else "health"
+        f = await db.facilities.find_one({
+            "district_id": district_id, "category": cat,
+            "name": {"$regex": re.escape(name_clean), "$options": "i"}
+        })
+        if f:
+            return {"facility_id": str(f.get("id", f.get("_id"))), "facility_name": f["name"]}
+        return None
+
+    for idx, row in enumerate(rows, start=2):
+        try:
+            # Unpack — safely handle short rows
+            vals = [str(c).strip() if c is not None else "" for c in (list(row) + [None] * 14)[:14]]
+            full_name = vals[0]
+            phone_normal = vals[1]
+            phone_whatsapp = vals[2] or None
+            cadre_code = vals[3]
+            level = vals[4] if category == "education" else None  # Primary | Secondary
+            subject1 = vals[5] or None
+            subject2 = vals[6] or None
+            region_name = vals[7]
+            district_name = vals[8]
+            facility_name = vals[9] or None
+            dest_region1_name = vals[10] or None
+            dest_districts1_str = vals[11] or None
+            dest_region2_name = vals[12] or None
+            dest_districts2_str = vals[13] or None
+
+            # Validate required fields
+            if not full_name or not phone_normal or not cadre_code or not region_name or not district_name:
+                errors.append({"row": idx, "name": full_name or "—", "error": "Jina, simu, kada, mkoa na wilaya ni lazima"})
+                skipped += 1
+                continue
+
+            # Normalize phone
+            try:
+                phone = normalize_phone(phone_normal)
+            except ValueError:
+                errors.append({"row": idx, "name": full_name, "error": f"Simu sahihi: {phone_normal}"})
+                skipped += 1
+                continue
+
+            # Check duplicate phone
+            if await db.users.find_one({"$or": [{"phone_primary": phone}, {"phone_alt": phone}]}):
+                errors.append({"row": idx, "name": full_name, "error": f"Simu {phone} tayari imetumika"})
+                skipped += 1
+                continue
+
+            phone_wa = None
+            if phone_whatsapp:
+                try:
+                    phone_wa = normalize_phone(phone_whatsapp)
+                except ValueError:
+                    pass  # hiari — tuiache tu
+
+            # Resolve cadre
+            cadre_doc = await db.cadres.find_one({"code": {"$regex": f"^{re.escape(cadre_code)}$", "$options": "i"}})
+            if not cadre_doc:
+                errors.append({"row": idx, "name": full_name, "error": f"Kada haijulikani: {cadre_code}"})
+                skipped += 1
+                continue
+            cadre_display = cadre_doc.get("display_name", cadre_code)
+
+            # Resolve region + district
+            region = await _resolve_region(region_name)
+            if not region:
+                errors.append({"row": idx, "name": full_name, "error": f"Mkoa haijulikani: {region_name}"})
+                skipped += 1
+                continue
+            district = await _resolve_district(region["region_id"], district_name)
+            if not district:
+                errors.append({"row": idx, "name": full_name, "error": f"Wilaya haijulikani: {district_name}"})
+                skipped += 1
+                continue
+            facility = await _resolve_facility(district["district_id"], facility_name)
+
+            current_station = {
+                "region_id": region["region_id"], "region_name": region["region_name"],
+                "district_id": district["district_id"], "district_name": district["district_name"],
+            }
+            if facility:
+                current_station["facility_id"] = facility["facility_id"]
+                current_station["facility_name"] = facility["facility_name"]
+            if level:
+                current_station["level"] = level
+
+            # Build destinations
+            desired_destinations: list[dict] = []
+            for dr_name, dd_str in [(dest_region1_name, dest_districts1_str), (dest_region2_name, dest_districts2_str)]:
+                if not dr_name:
+                    continue
+                dr = await _resolve_region(dr_name)
+                if not dr:
+                    continue
+                dest_obj: dict = {"region_id": dr["region_id"], "region_name": dr["region_name"], "districts": []}
+                if dd_str:
+                    for dpart in str(dd_str).split(","):
+                        dpart = dpart.strip()
+                        if dpart:
+                            dd = await _resolve_district(dr["region_id"], dpart)
+                            if dd:
+                                dest_obj["districts"].append({"district_id": dd["district_id"], "district_name": dd["district_name"]})
+                desired_destinations.append(dest_obj)
+
+            subjects = [s for s in [subject1, subject2] if s]
+            password = _gen_password()
+
+            doc = {
+                "full_name": full_name.strip(),
+                "email": None,
+                "phone_primary": phone,
+                "phone_alt": phone_wa,
+                "password_hash": hash_password(password),
+                "password_plain": password,
+                "category": category,
+                "cadre_code": cadre_doc["code"],
+                "cadre_display": cadre_display,
+                "subjects": subjects,
+                "employment_sector": category,
+                "current_station": current_station,
+                "desired_destinations": desired_destinations,
+                "status": "active",
+                "is_verified": _is_default_name(full_name),
+                "is_admin": False,
+                "email_verified": False,
+                "notification_prefs": {"new_matches": True, "messages": True},
+                "followed_regions": [],
+                "created_at": now,
+                "updated_at": now,
+                "last_seen_at": now,
+            }
+            try:
+                await db.users.insert_one(doc)
+                created += 1
+            except DuplicateKeyError:
+                errors.append({"row": idx, "name": full_name, "error": "Duplicate phone"})
+                skipped += 1
+        except Exception as e:
+            errors.append({"row": idx, "name": str(row[0]) if row else "—", "error": str(e)[:120]})
+            skipped += 1
+
+    if created > 0:
+        await _bust_admin_caches()
+        publish(TOPIC_USER_REGISTERED, {
+            "event": "user.registered", "full_name": "[bulk import]",
+            "category": category, "occurred_at": now.isoformat(),
+        })
+
+    return {
+        "ok": True,
+        "created": created,
+        "skipped": skipped,
+        "total_rows": len(rows),
+        "errors": errors[:50],
+    }
+
+
+# ─── DOWNLOAD EXCEL TEMPLATE ────────────────────────────────────────────────
+@router.get("/users/import/template")
+async def admin_import_template(category: str = Query(...), _=Depends(current_admin)):
+    """Download an empty Excel template with headers + example row."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    if category not in ("health", "education", "service"):
+        raise HTTPException(422, "category lazima iwe health, education, au service")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = category.capitalize()
+
+    headers = [
+        "Jina Kamili",
+        "Simu ya Kawaida",
+        "Simu ya WhatsApp",
+        "Kada",
+        "Kiwango" if category == "education" else "—",
+        "Somo 1",
+        "Somo 2",
+        "Mkoa wa Sasa",
+        "Wilaya",
+        "Shule / Kituo",
+        "Mkoa wa Lengo 1",
+        "Wilaya za Lengo 1",
+        "Mkoa wa Lengo 2",
+        "Wilaya za Lengo 2",
+    ]
+
+    # Example row
+    if category == "education":
+        example = [
+            "Juma Ramadhani",
+            "0763795801",
+            "0625607088",
+            "P2",
+            "Secondary",
+            "MATH",
+            "PHYSICS",
+            "Kilimanjaro",
+            "Hai",
+            "—",
+            "Dar Es Salaam",
+            "Kinondoni, Temeke",
+            "Arusha",
+            "Arusha",
+        ]
+    elif category == "health":
+        example = [
+            "Asha Mwakibeta",
+            "0754123456",
+            "",
+            "CO",
+            "—",
+            "—",
+            "—",
+            "Dodoma",
+            "Dodoma Mjini",
+            "Hospitali ya Rufaa Dodoma",
+            "Dar Es Salaam",
+            "Ilala",
+            "",
+            "",
+        ]
+    else:  # service
+        example = [
+            "Hamisi Selemani",
+            "0763795801",
+            "",
+            "AA",
+            "—",
+            "—",
+            "—",
+            "Tabora",
+            "Tabora Mjini",
+            "Ofisi ya Mkuu wa Mkoa",
+            "Dodoma",
+            "Dodoma Mjini",
+            "",
+            "",
+        ]
+
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+    example_font = Font(color="6B7280", italic=True, size=10)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = thin_border
+        ws.column_dimensions[cell.column_letter].width = max(len(h) + 4, 16)
+
+    for c, v in enumerate(example, 1):
+        cell = ws.cell(row=2, column=c, value=v)
+        cell.font = example_font
+        cell.border = thin_border
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"template_{category}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/users/{user_id}/password")
