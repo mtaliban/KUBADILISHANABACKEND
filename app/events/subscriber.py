@@ -405,43 +405,6 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
     if ws_batch:
         _push_batch_to_users(ws_batch)
 
-    # ── PUSH NOTIFICATIONS (FCM/Web Push) ──────────────────────────
-    # Send push notifications for important events (when user is offline)
-    # This runs in background thread — don't block MQTT processing.
-    try:
-        import asyncio
-        from ..notifications.push_sender import send_push_to_user
-
-        async def _send_pushes():
-            online = set(manager.online_users())
-            for uid, ntype, title, body, data in pending:
-                # Skip if user is online (they already got WS notification)
-                if uid in online:
-                    continue
-                # Only send push for important event types
-                if ntype in (
-                    "user.registered",
-                    "payment.approved",
-                    "payment.rejected",
-                    "announcement",
-                    "match.found",
-                    "call.initiated",
-                ):
-                    await send_push_to_user(uid, title, body, data)
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_send_pushes())
-            else:
-                loop.run_until_complete(_send_pushes())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(_send_pushes())
-            loop.close()
-    except Exception as e:
-        logger.debug(f"Push notification batch failed (non-critical): {e}")
-
 
 def _fanout_match_to_ws(payload: dict) -> None:
     """When kv/match/found fires, push it via WebSocket to both matched users."""
