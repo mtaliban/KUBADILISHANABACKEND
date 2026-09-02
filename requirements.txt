@@ -16,3 +16,6 @@ prometheus-client==0.21.0
 openpyxl==3.1.5
 reportlab==4.2.5
 python-docx==1.1.2
+# Push notifications (optional — set FIREBASE_CREDENTIALS env var)
+# firebase-admin==6.5.0
+# pywebpush==2.0.0
