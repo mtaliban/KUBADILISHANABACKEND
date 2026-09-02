@@ -2256,9 +2256,12 @@ async def data_facilities_add(body: FacilityIn, admin=Depends(current_admin)):
         await db.schools.insert_one(dict(doc))
         doc.pop("created_at", None)
     else:
-        code = (body.code or f"HF-{body.district_id}-{body.name[:3].upper()}").strip().upper()
-        if await db.health_facilities.find_one({"code": code}):
-            raise HTTPException(409, f"Kituo '{code}' tayari kipo")
+        base = (body.code or f"HF-{body.district_id}-{body.name[:3].upper()}").strip().upper()
+        code = base
+        suffix = 2
+        while await db.health_facilities.find_one({"code": code}):
+            code = f"{base}-{suffix}"
+            suffix += 1
         doc = {
             "code": code, "name": body.name.strip(),
             "type": body.type or "Dispensary", "type_category": body.type or "",
