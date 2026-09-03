@@ -32,18 +32,36 @@ def _try_oid(value: str):
 class CallLogRequest(BaseModel):
     to_user_id: str
     outcome: str = Field("initiated", pattern="^(initiated|answered|missed)$")
+    contact_type: str = Field("call", pattern="^(call|sms|whatsapp)$")
 
 
 @router.post("/call")
 async def log_call(body: CallLogRequest, user=Depends(current_user)):
     db = get_db(); from_id = str(user["_id"]); now = datetime.now(timezone.utc)
-    doc = {"from_user_id": from_id, "to_user_id": body.to_user_id, "initiated_at": now, "status": body.outcome}
+    doc = {
+        "from_user_id": from_id, "to_user_id": body.to_user_id,
+        "initiated_at": now, "status": body.outcome,
+        "contact_type": body.contact_type,  # call | sms | whatsapp
+    }
     res = await db.call_logs.insert_one(doc)
-    publish(f"{TOPIC_CALL_INITIATED}/{body.to_user_id}", {
-        "event": "call.initiated", "call_id": str(res.inserted_id),
+    # Fetch recipient name for real-time broadcast
+    to_user = await db.users.find_one({"_id": _try_oid(body.to_user_id)}, {"full_name": 1})
+    to_name = to_user["full_name"] if to_user else "Mtumiaji"
+    payload = {
+        "event": "contact.activity", "call_id": str(res.inserted_id),
         "from_user_id": from_id, "from_full_name": user["full_name"],
-        "to_user_id": body.to_user_id, "initiated_at": now.isoformat(),
-    })
+        "to_user_id": body.to_user_id, "to_full_name": to_name,
+        "contact_type": body.contact_type,
+        "initiated_at": now.isoformat(),
+    }
+    publish(f"{TOPIC_CALL_INITIATED}/{body.to_user_id}", payload)
+    # Broadcast to all admins (real-time admin panel update)
+    admin_ids = [str(a["_id"]) async for a in db.users.find({"is_admin": True}, {"_id": 1})]
+    for aid in admin_ids:
+        try:
+            await manager.send_to_user(aid, {"event": "notification", "type": "contact.activity", **payload})
+        except Exception:
+            pass
     return {"call_id": str(res.inserted_id), "initiated_at": now.isoformat()}
 
 
@@ -61,6 +79,44 @@ async def my_call_history(user=Depends(current_user), limit: int = Query(50, le=
                       "with_phone": other["phone_primary"] if other else None,
                       "status": c.get("status"), "initiated_at": c.get("initiated_at")})
     return calls
+
+
+@router.get("/admin/contacts")
+async def admin_contact_activity(user=Depends(current_user), limit: int = Query(100, le=500)):
+    """Admin: onyesha mawasiliano yote (call/sms/whatsapp) kati ya watumiaji.
+    Real-time — inajirefresh kupitia SSE/WS event (contact.activity).
+    Kila row inaonyesha: nani aliwasiliana na nani, aina ya mawasiliano, na wakati."""
+    db = get_db()
+    uid = str(user["_id"])
+    is_admin = (await db.users.find_one({"_id": user["_id"]}, {"is_admin": 1}))
+    if not is_admin or not is_admin.get("is_admin"):
+        raise HTTPException(403, "Huna ruhusa — admin tu")
+    cur = db.call_logs.find({}).sort("initiated_at", -1).limit(limit)
+    results = []
+    async for c in cur:
+        from_user = await db.users.find_one({"_id": _try_oid(c["from_user_id"])},
+            {"full_name": 1, "phone_primary": 1, "category": 1, "cadre_code": 1, "current_station": 1})
+        to_user = await db.users.find_one({"_id": _try_oid(c["to_user_id"])},
+            {"full_name": 1, "phone_primary": 1, "category": 1, "cadre_code": 1, "current_station": 1})
+        results.append({
+            "call_id": str(c["_id"]),
+            "contact_type": c.get("contact_type", "call"),
+            "from_user_id": c["from_user_id"],
+            "from_full_name": from_user["full_name"] if from_user else "Mtumiaji",
+            "from_phone": from_user["phone_primary"] if from_user else None,
+            "from_category": (from_user or {}).get("category"),
+            "from_cadre": (from_user or {}).get("cadre_code"),
+            "from_region": (from_user or {}).get("current_station", {}).get("region_name"),
+            "to_user_id": c["to_user_id"],
+            "to_full_name": to_user["full_name"] if to_user else "Mtumiaji",
+            "to_phone": to_user["phone_primary"] if to_user else None,
+            "to_category": (to_user or {}).get("category"),
+            "to_cadre": (to_user or {}).get("cadre_code"),
+            "to_region": (to_user or {}).get("current_station", {}).get("region_name"),
+            "status": c.get("status", "initiated"),
+            "initiated_at": c.get("initiated_at"),
+        })
+    return {"count": len(results), "contacts": results}
 
 
 @router.get("/presence")

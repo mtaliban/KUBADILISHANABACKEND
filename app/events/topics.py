@@ -21,6 +21,7 @@ TOPIC_MATCH_FOUND = "kv/match/found"
 # Messaging
 TOPIC_MESSAGE_SENT = "kv/message/sent"       # + "/{recipient_user_id}"
 TOPIC_CALL_INITIATED = "kv/call/initiated"   # + "/{recipient_user_id}"
+TOPIC_CONTACT_ACTIVITY = "kv/contact/activity"  # call/sms/whatsapp — admin real-time
 
 # Payments (manual donation verification)
 TOPIC_PAYMENT_SUBMITTED = "kv/payment/submitted"  # + "/{user_id}"
