@@ -4,7 +4,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from ...db import get_db
-from ...security import current_user, user_id_from_token
+from ...security import current_user, current_admin, user_id_from_token
 from ...events.publisher import publish
 from ...events.topics import TOPIC_CALL_INITIATED, TOPIC_USER_PRESENCE
 from .ws_manager import manager
@@ -82,15 +82,11 @@ async def my_call_history(user=Depends(current_user), limit: int = Query(50, le=
 
 
 @router.get("/admin/contacts")
-async def admin_contact_activity(user=Depends(current_user), limit: int = Query(100, le=500)):
+async def admin_contact_activity(_=Depends(current_admin), limit: int = Query(100, le=500)):
     """Admin: onyesha mawasiliano yote (call/sms/whatsapp) kati ya watumiaji.
     Real-time — inajirefresh kupitia SSE/WS event (contact.activity).
     Kila row inaonyesha: nani aliwasiliana na nani, aina ya mawasiliano, na wakati."""
     db = get_db()
-    uid = str(user["_id"])
-    is_admin = (await db.users.find_one({"_id": user["_id"]}, {"is_admin": 1}))
-    if not is_admin or not is_admin.get("is_admin"):
-        raise HTTPException(403, "Huna ruhusa — admin tu")
     cur = db.call_logs.find({}).sort("initiated_at", -1).limit(limit)
     results = []
     async for c in cur:
