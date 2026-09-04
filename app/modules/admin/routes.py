@@ -1602,7 +1602,9 @@ async def grant_admin(user_id: str, _=Depends(current_admin)):
 
 
 @router.post("/users/{user_id}/revoke-admin")
-async def revoke_admin(user_id: str, _=Depends(current_admin)):
+async def revoke_admin(user_id: str, me: dict = Depends(current_admin)):
+    if str(me["_id"]) == user_id:
+        raise HTTPException(400, "Hujawezi kuondoa admin mwenyewe")
     r = await get_db().users.update_one({"_id": _as_object_id(user_id)}, {"$set": {"is_admin": False}})
     if not r.matched_count: raise HTTPException(404, "User not found")
     await _bust_admin_caches()
