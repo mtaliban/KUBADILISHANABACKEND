@@ -27,31 +27,19 @@ def _get_firebase_app():
         import firebase_admin
         from firebase_admin import credentials
 
-        # Look for service account JSON in several locations
-        candidates = [
-            os.environ.get("FIREBASE_SERVICE_ACCOUNT_PATH", ""),
-            str(Path(__file__).resolve().parent.parent.parent / "config" / "firebase-service-account.json"),
-            str(Path.home() / "Documents" / "KUBADILISHANA_VITUO" / "backend" / "config" / "firebase-service-account.json"),
-        ]
+        # 1. Try environment variable (for Docker / production)
+        svc_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if svc_json:
+            info = json.loads(svc_json)
+            cred = credentials.Certificate(info)
+            _firebase_app = firebase_admin.initialize_app(cred)
+            _initialized = True
+            logger.info("[FCM] Firebase Admin SDK initialised from env var")
+            return _firebase_app
 
-        cred_path = None
-        for c in candidates:
-            if c and os.path.isfile(c):
-                cred_path = c
-                break
-
-        # If no file found, try environment variable with JSON content
-        if not cred_path:
-            svc_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
-            if svc_json:
-                info = json.loads(svc_json)
-                cred = credentials.Certificate(info)
-                _firebase_app = firebase_admin.initialize_app(cred)
-                _initialized = True
-                logger.info("[FCM] Firebase Admin SDK initialised from env var")
-                return _firebase_app
-
-        if cred_path:
+        # 2. Try file path from env var
+        cred_path = os.environ.get("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+        if cred_path and os.path.isfile(cred_path):
             cred = credentials.Certificate(cred_path)
             _firebase_app = firebase_admin.initialize_app(cred)
             _initialized = True
