@@ -19,3 +19,4 @@ services/analytics-service/csv_output/*.csv
 .idea/
 .venv-test/
 csv_output/
+config/

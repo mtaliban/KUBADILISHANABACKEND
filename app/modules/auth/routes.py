@@ -574,3 +574,50 @@ async def admin_login(body: AdminEmailLoginRequest):
                            f"code iko kwenye skrini. Halali dakika {OTP_TTL_MINUTES}. "
                            "Baada ya kuingia, weka email kwenye Mipangilio.")
     return resp
+
+
+# ── FCM Token Registration ──────────────────────────────────────────────
+from pydantic import BaseModel
+from typing import List
+
+class FCMTokenRequest(BaseModel):
+    token: str
+
+class FCMBulkTokenRequest(BaseModel):
+    tokens: List[str]
+
+@router.post("/fcm-token")
+async def register_fcm_token(body: FCMTokenRequest, user=Depends(current_user)):
+    """Register a Firebase Cloud Messaging device token."""
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(400, "FCM token is required")
+    await get_db().users.update_one(
+        {"_id": user["_id"]},
+        {"$addToSet": {"fcm_tokens": token}},
+    )
+    return {"ok": True, "message": "FCM token registered"}
+
+
+@router.delete("/fcm-token")
+async def remove_fcm_token(body: FCMTokenRequest, user=Depends(current_user)):
+    """Remove a specific FCM token (e.g. on logout)."""
+    token = body.token.strip()
+    if token:
+        await get_db().users.update_one(
+            {"_id": user["_id"]},
+            {"$pull": {"fcm_tokens": token}},
+        )
+    return {"ok": True}
+
+
+@router.post("/fcm-token/bulk")
+async def register_fcm_token_bulk(body: FCMBulkTokenRequest, user=Depends(current_user)):
+    """Register multiple FCM tokens at once."""
+    clean = [t.strip() for t in body.tokens if t and isinstance(t, str)]
+    if clean:
+        await get_db().users.update_one(
+            {"_id": user["_id"]},
+            {"$addToSet": {"fcm_tokens": {"$each": clean}}},
+        )
+    return {"ok": True, "registered": len(clean)}

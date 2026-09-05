@@ -3,6 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 COPY app ./app
+COPY config ./config
 RUN mkdir -p /app/csv_output
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "websockets"]

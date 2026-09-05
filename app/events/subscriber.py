@@ -20,6 +20,7 @@ from ..cache import get_redis
 from ..modules.matches.matching import match_score
 from ..modules.messaging.ws_manager import manager
 from ..services.sms import send_sms, sms_enabled
+from ..services.fcm import send_push_to_user
 from .topics import (
     TOPIC_ALL, TOPIC_USER_REGISTERED, TOPIC_USER_PROFILE_UPDATED,
     TOPIC_USER_DESTINATION_CHANGED, TOPIC_USER_STATION_CHANGED,
@@ -136,6 +137,19 @@ def _push_batch_to_users(batch: list[tuple[dict, str]]) -> None:
         loop.close()
     except Exception as e:
         logger.exception(f"WS push failed: {e}")
+
+
+def _fcm_push(user_id: str, title: str, body: str, data: dict | None = None) -> None:
+    """Send FCM push notification (from a background thread)."""
+    import asyncio
+    async def _send():
+        await send_push_to_user(user_id, title, body, data)
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_send())
+        loop.close()
+    except Exception as e:
+        logger.debug(f"FCM push failed (non-critical): {e}")
 
 
 def _admin_user_ids(db) -> list[str]:
@@ -402,6 +416,8 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
             # authenticated WebSocket (see useLiveEvents). Publishing these
             # to MQTT too would just duplicate traffic on our own broker.
             ws_batch.append((notif_payload, uid))
+            # FCM push — notify mtumiaji kwa phone yake (push notification)
+            _fcm_push(uid, title, body, data)
     if ws_batch:
         _push_batch_to_users(ws_batch)
 
