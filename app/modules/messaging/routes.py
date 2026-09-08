@@ -77,6 +77,7 @@ async def my_call_history(user=Depends(current_user), limit: int = Query(50, le=
                       "with_user_id": other_id,
                       "with_full_name": other["full_name"] if other else "Mtumiaji",
                       "with_phone": other["phone_primary"] if other else None,
+                      "contact_type": c.get("contact_type", "call"),
                       "status": c.get("status"), "initiated_at": c.get("initiated_at")})
     return calls
 
