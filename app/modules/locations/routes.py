@@ -137,6 +137,27 @@ async def list_departments():
     return await cached(key, _load)
 
 
+# Kada za zamani zenye `category` isiyolingana na code ya idara. Idara ni
+# `watumishi_wa_umma`, lakini kadha ya VEO ilihifadhiwa na category `waumma` —
+# hivyo usajili wa idara hiyo ulikuta orodha tupu ya kada na mtumiaji alikwama.
+LEGACY_CADRE_CATEGORIES = {"waumma": "watumishi_wa_umma", "service": "watumishi_wa_umma"}
+
+
+async def _normalize_cadre_categories() -> int:
+    """Rudisha kada za zamani kwenye code sahihi ya idara (idempotent).
+    Inarudisha idadi ya kada zilizorekebishwa."""
+    db = get_db()
+    fixed = 0
+    for legacy, correct in LEGACY_CADRE_CATEGORIES.items():
+        if legacy == correct:
+            continue
+        res = await db.cadres.update_many(
+            {"category": legacy}, {"$set": {"category": correct}}
+        )
+        fixed += res.modified_count
+    return fixed
+
+
 @router.get("/cadres")
 async def list_cadres(
     category: Optional[str] = Query(None),
@@ -145,6 +166,18 @@ async def list_cadres(
     """Cadres — zinaload kutoka DB first time, kisha kutoka cache.
     `sector` inatumika kwa afya tu: wizara_afya vs tamisemi.
     Kwa sasa zote zina kada sawa, lakini sector inahifadhiwa kwa matumizi ya baadaye."""
+    # Rekebisha makada ya zamani kwanza; zikirekebishwa, futa cache ya kada
+    # (inaweza kuwa imehifadhi orodha tupu kwa idara hiyo).
+    if await _normalize_cadre_categories():
+        try:
+            from ...cache import get_redis
+            r = get_redis()
+            keys = [k async for k in r.scan_iter("cadres:*")]
+            keys += [k async for k in r.scan_iter("admin:data:cadres*")]
+            if keys:
+                await r.delete(*keys)
+        except Exception:
+            pass
     key = f"cadres:{category or 'all'}:{sector or 'all'}"
     async def _load():
         q = {}
