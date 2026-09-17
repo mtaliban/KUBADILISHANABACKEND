@@ -14,7 +14,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from ...config import settings
 from ...db import get_db
 from ...events.publisher import publish
@@ -1569,13 +1569,12 @@ async def migrate_default_names(admin=Depends(current_admin)):
     async for u in cursor2:
         await db.users.update_one({"_id": u["_id"]}, {"$set": {"years_of_service": 3, "updated_at": now}})
         updated_years += 1
-    # 3. Ondoa departments zilizoondolewa — acha tu Afya, Elimu, Watumishi wa Umma
-    VALID_DEPTS = {'health', 'education', 'watumishi_wa_umma'}
-    removed_depts = await db.departments.delete_many({"code": {"$nin": list(VALID_DEPTS)}})
+    # 3. HATUFUTI idara hapa — migration ya majina haipaswi kufuta reference data
+    #    ambayo admin ameongeza kwa mkono (ilikuwa ikifuta kimya kimya).
     await _bust_admin_caches()
     return {"ok": True, "updated": updated, "updated_years": updated_years,
-            "removed_depts": removed_depts.deleted_count,
-            "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3, removed {removed_depts.deleted_count} old departments"}
+            "removed_depts": 0,
+            "message": f"Updated {updated} default names to PAID, {updated_years} old users to years_of_service=3"}
 
 
 @router.post("/departments/cleanup")
@@ -1877,14 +1876,32 @@ async def _publish_data_event(topic: str, event_type: str, kind: str, action: st
         logger.exception(f"data event publish failed: {e}")
 
 
+def _normalize_department_code(v: str) -> str:
+    """Code ya idara: herufi ndogo + namba + _ pekee (DB schema). Nafasi na
+    alama nyingine zinageuzwa `_`, herufi kubwa zinashushwa — vinginevyo
+    "Idara Ya Afya" au "Afya Ya Umma" ilikataa 422 na admin alishindwa kuongeza."""
+    code = re.sub(r"[^a-z0-9]+", "_", v.strip().lower()).strip("_")
+    if len(code) < 2:
+        raise ValueError("code fupi mno (lazima herufi 2+)")
+    if len(code) > 40:
+        raise ValueError("code ndefu mno (max herufi 40)")
+    return code
+
+
 class DepartmentIn(BaseModel):
     """Idara (department) — k.m. Afya, Elimu. Admin anaweza kuongeza mpya,
     kubadilisha jina, kusitisha (suspend) au kufuta. Kada na watumiaji
     wanarejea idara kwa `code` (category)."""
-    code: str = Field(..., min_length=2, max_length=30, pattern="^[a-z0-9_-]+$")
+    code: str = Field("", max_length=40)
     name: str = Field(..., min_length=2, max_length=120)
     status: str = Field("active", pattern="^(active|disabled)$")
     icon: str | None = Field(None, max_length=10)
+
+    @field_validator("code")
+    @classmethod
+    def _slugify_code(cls, v: str) -> str:
+        # code inaweza kuachwa wazi (inatengenezwa kutoka jina kwenye route).
+        return _normalize_department_code(v) if v else v
 
 
 class SubjectIn(BaseModel):
@@ -1922,16 +1939,14 @@ async def _next_id(db, collection: str) -> int:
 
 
 async def _ensure_default_departments(db) -> None:
-    """Hakikisha idara za msingi zipo — kila department mpya inaongezwa automatically.
-    Hivyo tab ya Idara huwa ina data hata kwenye mfumo mpya."""
+    """Hakikisha idara za msingi zipo (health/education/watumishi_wa_umma).
+    Idara NYINGINE yoyote iliyoongezwa na admin HAIFUTWI hapa — vinginevyo
+    data ya admin ingepotea kila mara tab ya Data/an usajili unapofunguliwa."""
     defaults = [
         {"code": "health", "name": "Afya", "status": "active", "icon": None},
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
         {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
     ]
-    VALID_CODES = {d["code"] for d in defaults}
-    # Futa departments zilizoondolewa kabla ya kuongeza mpya
-    await db.departments.delete_many({"code": {"$nin": list(VALID_CODES)}})
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
             await db.departments.insert_one(dict(d))
@@ -1953,7 +1968,9 @@ async def data_departments(_=Depends(current_admin)):
 @router.post("/data/departments")
 async def data_departments_add(body: DepartmentIn, admin=Depends(current_admin)):
     db = get_db()
-    code = body.code.strip().lower()
+    # code ikiachwa wazi inatengenezwa kutoka jina (k.m. "Maji na Usafi" →
+    # "maji_na_usafi") — admin hahitaji kuiandika wala kujua sheria zake.
+    code = body.code or _normalize_department_code(body.name)
     if await db.departments.find_one({"code": code}):
         raise HTTPException(409, f"Idara '{body.name}' tayari ipo (code: {code})")
     data = {"code": code, "name": body.name.strip(), "status": body.status, "icon": body.icon}
@@ -1967,7 +1984,7 @@ async def data_departments_add(body: DepartmentIn, admin=Depends(current_admin))
 async def data_departments_update(code: str, body: DepartmentIn, admin=Depends(current_admin)):
     db = get_db()
     updates = body.model_dump()
-    updates["code"] = updates["code"].strip().lower()
+    updates["code"] = updates["code"] or _normalize_department_code(body.name)
     # Ikiwa code inabadilishwa, sasisha pia kada na watumiaji wanaotumia hiyo
     # idara (category) — vinginevyo wanabaki na code ya zamani.
     if updates["code"] != code:
