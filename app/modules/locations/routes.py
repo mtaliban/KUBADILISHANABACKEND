@@ -24,12 +24,17 @@ async def data_version():
     import hashlib, json
     db = get_db()
     counts = {}
-    for col in ["regions", "districts", "facilities", "departments", "cadres", "subjects"]:
+    # collections halisi za reference data (`facilities` haipo — ni
+    # `health_facilities` + `schools`; `events` haipo — ni `event_log`).
+    # Bila hii hash haikubadiliki hata admin akiongeza data → frontend
+    # cache za kale hazifutwi → "nimeongeza idara, usajili haioni".
+    for col in ["regions", "districts", "health_facilities", "schools",
+                "departments", "cadres", "subjects"]:
         counts[col] = await db[col].count_documents({})
     # include latest modified timestamp from admin audit if available
     try:
-        last = await db.events.find_one({}, sort=[("ts", -1)])
-        counts["_ts"] = str(last.get("ts", "")) if last else ""
+        last = await db.event_log.find_one({}, sort=[("occurred_at", -1)])
+        counts["_ts"] = str(last.get("occurred_at", "")) if last else ""
     except Exception:
         counts["_ts"] = ""
     h = hashlib.md5(json.dumps(counts, sort_keys=True).encode()).hexdigest()[:12]
@@ -112,15 +117,15 @@ async def list_facilities_in_region(
 async def list_departments():
     """Idara zote ACTIVE (kwa usajili na dropdown) — idara zilizositishwa
     hazionekani kwa watumiaji (suspend ya idara)."""
-    # Hakikisha idara za msingi zipo — kila mpya inaongezwa automatically
+    # Hakikisha idara za msingi zipo — LAKINI tusifute idara nyingine yoyote.
+    # (Zamani hapa tulikuwa tunafuta `$nin` defaults — hivyo idara yoyote
+    # iliyoongezwa na admin ilifutwa mara tu mtumiaji akifungua usajili.)
     db = get_db()
     defaults = [
         {"code": "health", "name": "Afya", "status": "active", "icon": None},
         {"code": "education", "name": "Elimu", "status": "active", "icon": None},
         {"code": "watumishi_wa_umma", "name": "Watumishi wa Umma", "status": "active", "icon": None},
     ]
-    VALID_CODES = {d["code"] for d in defaults}
-    await db.departments.delete_many({"code": {"$nin": list(VALID_CODES)}})
     for d in defaults:
         if not await db.departments.find_one({"code": d["code"]}):
             await db.departments.insert_one(dict(d))

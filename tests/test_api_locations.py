@@ -31,6 +31,36 @@ async def test_list_districts_for_region(client, db):
     assert missing.status_code == 404
 
 
+async def test_default_departments_are_seeded(client, db):
+    """Usajili unahitaji idara za msingi kuwepo kila wakati."""
+    res = await client.get("/locations/departments")
+    assert res.status_code == 200
+    codes = {d["code"] for d in res.json()}
+    assert {"health", "education", "watumishi_wa_umma"} <= codes
+
+
+async def test_custom_department_survives_registration_lookup(client, db):
+    """Regression: idara iliyoongezwa na admin ILIKUWA inafutwa mara tu mtu
+    akifungua usajili — `/locations/departments` ilifuta kila kitu
+    kisichokuwa kwenye orodha ya hardcoded (health/education/watumishi_wa_umma).
+    Hivyo admin alikuwa akiongeza data, kisha asiione kwenye usajili."""
+    await db.departments.insert_one(
+        {"code": "ujenzi", "name": "Ujenzi", "status": "active", "icon": None}
+    )
+
+    res = await client.get("/locations/departments")
+    assert res.status_code == 200
+    assert "ujenzi" in {d["code"] for d in res.json()}
+    # Bado ipo kwenye DB baada ya request (haikufutwa kimyakimya).
+    assert await db.departments.count_documents({"code": "ujenzi"}) == 1
+
+    # Idara iliyositishwa (disabled) haionekani kwa watumiaji.
+    await db.departments.update_one({"code": "ujenzi"}, {"$set": {"status": "disabled"}})
+    res2 = await client.get("/locations/departments")
+    assert "ujenzi" not in {d["code"] for d in res2.json()}
+    assert await db.departments.count_documents({"code": "ujenzi"}) == 1
+
+
 async def test_list_cadres_filtered_and_sorted(client, db):
     await db.cadres.insert_many([
         {"code": "NO", "category": "health", "display_name": "Nursing Officer (NO)"},
