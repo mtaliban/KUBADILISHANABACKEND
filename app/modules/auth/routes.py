@@ -115,19 +115,32 @@ async def register(body: RegisterRequest):
         except ValueError as e:
             raise HTTPException(422, f"phone_alt: {e}")
 
-    cadre = await db.cadres.find_one({"code": body.cadre_code}, {"_id": 0})
-    if not cadre:
-        raise HTTPException(422, f"Unknown cadre_code: {body.cadre_code}")
-    if cadre["category"] != body.category:
-        raise HTTPException(422, f"cadre {body.cadre_code} belongs to '{cadre['category']}', not '{body.category}'")
-    if cadre.get("requires_subjects") and len(body.subjects) < 2:
-        raise HTTPException(422, "Lazima chagua masomo 2 — ni lazima kabisa")
+    # Idara mpya (k.m. Mifugo/Kilimo) inaweza kuwa HAIJAWEKWA kada bado —
+    # mtumiaji anajiunga bila kada (cadre_code="") na bado anapatana na wenzake
+    # wa idara hiyo (matching inalingana kwa idara + kada; kada tupu = wote wa
+    # idara hiyo). Idara iliyowahi kuwa na kada, lazima kada halisi itumike.
+    cadre = None
+    if body.cadre_code:
+        cadre = await db.cadres.find_one({"code": body.cadre_code}, {"_id": 0})
+        if not cadre:
+            raise HTTPException(422, f"Unknown cadre_code: {body.cadre_code}")
+        if cadre["category"] != body.category:
+            raise HTTPException(422, f"cadre {body.cadre_code} belongs to '{cadre['category']}', not '{body.category}'")
+        if cadre.get("requires_subjects") and len(body.subjects) < 2:
+            raise HTTPException(422, "Lazima chagua masomo 2 — ni lazima kabisa")
+    else:
+        # cadre_code tupu inaruhusiwa TU kwa idara isiyo na kada yoyote — kama
+        # idara ina kada, mtumiaji lazima achague moja (siyo njia ya kuepuka).
+        if await db.cadres.find_one({"category": body.category}, {"_id": 1}):
+            raise HTTPException(422, "Idara hii ina kada — chagua kada yako")
+
+    cadre_display = cadre["display_name"] if cadre else ""
 
     now = datetime.now(timezone.utc)
     doc = {        "full_name": body.full_name.strip(), "phone_primary": phone, "phone_alt": phone_alt,
         "password_hash": hash_password(body.password) if body.password else None,
         "category": body.category, "cadre_code": body.cadre_code,
-        "cadre_display": cadre["display_name"], "subjects": body.subjects,
+        "cadre_display": cadre_display, "subjects": body.subjects,
         "employment_sector": body.employment_sector,
         "years_of_service": body.years_of_service,
         "current_station": body.current_station.model_dump(),
@@ -149,7 +162,7 @@ async def register(body: RegisterRequest):
         "event": "user.registered", "user_id": uid,
         "full_name": doc["full_name"], "phone_primary": phone,
         "category": body.category, "cadre_code": body.cadre_code,
-        "cadre_display": cadre["display_name"], "subjects": body.subjects,
+        "cadre_display": cadre_display, "subjects": body.subjects,
         "current_station": doc["current_station"],
         "desired_destinations": doc["desired_destinations"],
         "occurred_at": now.isoformat(),

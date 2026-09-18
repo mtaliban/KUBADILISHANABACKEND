@@ -38,7 +38,10 @@ class RegisterRequest(BaseModel):
     password: str | None = None  # Hiari — login ni kwa namba ya simu tu
     category: str  # code ya idara (health/education au nyingine)
     employment_sector: Optional[str] = None  # 'wizara_afya' | 'tamisemi' — kwa afya tu
-    cadre_code: str
+    # Hiari — idara mpya (k.m. Mifugo/Kilimo) inaweza kuwa HAIJAWEKWA kada bado;
+    # mtumiaji wa idara hiyo anajiunga bila kada. Ikiwa imetumwa, lazima iwe
+    # kada halisi ya idara hiyo (validation iko kwenye route).
+    cadre_code: str = ""
     subjects: list[str] = Field(default_factory=list)
     years_of_service: Optional[int] = Field(None, ge=1, le=30, description='Miaka ya kazi — 1, 2, 3+ (3+ ina 3)')
     current_station: StationInput
