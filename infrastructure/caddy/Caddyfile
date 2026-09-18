@@ -1,11 +1,20 @@
 # ============================================================
 # Caddy — reverse proxy + HTTPS (Let's Encrypt) kwa backend API.
 #
-# Server IP: 196.249.120.2
-# sslip.io:  api.196-249-120-2.sslip.io → 196.249.120.2
-# Caddy inapata SSL certificate ya bure moja kwa moja.
+# ⚠️ MUHIMU: domain iliyo hapa LAZIMA iwe ina-resolve kwenye server hii
+# (A record = public IP ya EC2). Ikikosa, Let's Encrypt haitoi certificate
+# na TLS handshake inakataliwa → API YOTE inashindwa (login "inakataa",
+# register, dashboard... vyote). Kwa sslip.io, domain INAJITENGENEZA kutoka
+# IP: 16.171.23.21 → api.16-171-23-21.sslip.io
+#
+# Domain inatoka env CADDY_DOMAIN (tazama docker-compose.yml / .env) ili
+# usilazimike ku-edit faili hili kila IP ya EC2 inapobadilika.
+#
+# Upstream: caddy inaendesha kwa network_mode: host, hivyo inaongea na
+# backend kupitia port iliyofunguliwa kwenye host (127.0.0.1:8000) —
+# majina ya containers (kv_backend) hayarandikiki kwenye host networking.
 # ============================================================
 
-api.196-249-120-2.sslip.io {
-	reverse_proxy kv_backend:8000
+{$CADDY_DOMAIN:api.16-171-23-21.sslip.io} {
+	reverse_proxy {$CADDY_UPSTREAM:127.0.0.1:8000}
 }

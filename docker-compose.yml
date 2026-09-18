@@ -84,11 +84,18 @@ services:
 
   # Reverse proxy: HTTPS ya bure (Let's Encrypt) kupitia sslip.io —
   # hii inafanya backend iwe reachable kwa frontend ya Vercel (HTTPS→HTTPS).
+  #
+  # CADDY_DOMAIN LAZIMA iwe domain ambayo A record yake ni public IP ya
+  # server hii (sslip.io: 16.171.23.21 → api.16-171-23-21.sslip.io). Ikikosea,
+  # Let's Encrypt haitoi certificate na API YOTE inashindwa (login!).
   caddy:
     image: caddy:2-alpine
     container_name: kv_caddy
     restart: unless-stopped
     network_mode: host
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-api.16-171-23-21.sslip.io}
+      CADDY_UPSTREAM: ${CADDY_UPSTREAM:-127.0.0.1:8000}
     volumes:
       - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

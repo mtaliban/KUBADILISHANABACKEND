@@ -35,6 +35,42 @@ if [ -d "$APP_DIR/.git" ]; then
   fi
 fi
 
+# ── 1b) HTTPS (Caddy) self-heal ──────────────────────────────
+# Kosa la kawaida: certificate ya Caddy haipo/imeisha muda → TLS handshake
+# inakataliwa na API YOTE inashindwa (login "inakataa", register, dashboard).
+# Tunapima TLS pekee (bila kutegemea backend) na kuifanya upya.
+CADDY_DOMAIN="${CADDY_DOMAIN:-api.16-171-23-21.sslip.io}"
+STAMP="/tmp/kv-caddy-fix.stamp"
+
+has_cert() {
+  echo | timeout 8 openssl s_client -connect 127.0.0.1:443 \
+    -servername "$CADDY_DOMAIN" 2>/dev/null | grep -q "BEGIN CERTIFICATE"
+}
+
+if command -v openssl >/dev/null 2>&1 && ! has_cert; then
+  log "⚠️  HTTPS ya $CADDY_DOMAIN haitoi certificate — API YOTE itakataliwa (login!)"
+  if [ ! -f "$STAMP" ] || [ -n "$(find "$STAMP" -mmin +30 2>/dev/null)" ]; then
+    touch "$STAMP"
+    docker logs --tail 25 kv_caddy >>"$LOG" 2>&1 || true
+    docker compose up -d --force-recreate caddy >>"$LOG" 2>&1 \
+      || log "ℹ️  docker caddy: recreate imefeli (angalia docker logs kv_caddy)"
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+      sudo -n systemctl restart caddy >>"$LOG" 2>&1 \
+        && log "↻ systemd caddy imerestart" \
+        || log "ℹ️  systemd caddy inaendesha — restart inahitaji: sudo systemctl restart caddy"
+    fi
+    sleep 6
+    if has_cert; then
+      log "✅ HTTPS imerudi — certificate ipo"
+      rm -f "$STAMP"
+    else
+      log "❌ HTTPS bado haitoi certificate — angalia: docker logs kv_caddy"
+    fi
+  else
+    log "ℹ️  HTTPS bado mbovu — jaribio la mwisho lilikuwa <dakika 30 zilizopita"
+  fi
+fi
+
 # ── 2) Angalia digest ya Docker Hub ──────────────────────────
 NEW_DIGEST=$(curl -s --max-time 15 "$DOCKER_HUB_API" | python3 -c "
 import json,sys
