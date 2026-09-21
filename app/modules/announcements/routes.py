@@ -23,28 +23,34 @@ class AnnouncementCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=120)
     message: str = Field(..., min_length=3, max_length=2000)
     audience: str = "all"  # 'all' | 'user' | code ya idara (k.m. health, education, au mpya)
+    audiences: list[str] = Field(default_factory=list)  # multi-select: ['all'] au ['health', 'education'] au ['user']
     target_user_id: Optional[str] = None
 
 
 async def _resolve_recipients(db, body: AnnouncementCreate) -> list[str]:
-    if body.audience == "all":
-        cur = db.users.find({"status": "active"}, {"_id": 1})
-        return [str(u["_id"]) async for u in cur]
-    if body.audience and body.audience not in ("all", "user"):
-        # Idara yoyote (dynamic) — health, education, au idara mpya iliyoongezwa
-        # na admin. Watu wa idara hiyo tu wanapokea tangazo.
-        cur = db.users.find({"category": body.audience, "status": "active"}, {"_id": 1})
-        return [str(u["_id"]) async for u in cur]
-    if body.target_user_id:
+    # Single user (Mtu Mmoja)
+    if body.audience == "user" or (body.target_user_id and not (body.audiences or [body.audience] != ["user"])):
         try:
-            oid = ObjectId(body.target_user_id)
+            oid = ObjectId(body.target_user_id or "")
         except Exception:
-            raise HTTPException(400, "Invalid target_user_id")
+            raise HTTPException(400, "target_user_id sahihi inahitajika kwa audience=user")
         u = await db.users.find_one({"_id": oid}, {"_id": 1})
         if not u:
             raise HTTPException(404, "Target user not found")
         return [str(u["_id"])]
-    raise HTTPException(400, "target_user_id is required for audience=user")
+
+    # Multi-select: audiences (mpya) au audience (ya kale — backward compat)
+    auds = [a for a in (body.audiences or []) if a and a != "user"]
+    if not auds and body.audience and body.audience not in ("all", "user", ""):
+        auds = [body.audience]
+
+    if "all" in (body.audiences or []) or body.audience == "all" or not auds:
+        cur = db.users.find({"status": "active"}, {"_id": 1})
+        return [str(u["_id"]) async for u in cur]
+
+    # Idara nyingi (dynamic) — mtu yeyote wa idara yoyote iliyochaguliwa anapokea
+    cur = db.users.find({"category": {"$in": auds}, "status": "active"}, {"_id": 1})
+    return [str(u["_id"]) async for u in cur]
 
 
 @router.post("/admin/announcements", tags=["admin"])
@@ -53,10 +59,17 @@ async def send_announcement(body: AnnouncementCreate, admin=Depends(current_admi
     db = get_db()
     recipients = await _resolve_recipients(db, body)
     now = datetime.now(timezone.utc)
+    aud_store = [a for a in (body.audiences or []) if a] or (
+        [body.audience] if body.audience else ["all"])
+    if "all" in aud_store:
+        aud_store = ["all"]
+    doc_audience = body.audience if body.audience == "user" else (
+        aud_store[0] if len(aud_store) == 1 else "all")
     doc = {
         "title": body.title.strip(),
         "message": body.message.strip(),
-        "audience": body.audience,
+        "audience": doc_audience,
+        "audiences": aud_store,
         "target_user_id": body.target_user_id,
         "recipient_ids": recipients,
         "recipient_count": len(recipients),
@@ -82,7 +95,8 @@ async def send_announcement(body: AnnouncementCreate, admin=Depends(current_admi
     return {
         "announcement_id": ann_id,
         "sent_to": len(recipients),
-        "audience": body.audience,
+        "audience": doc_audience,
+        "audiences": aud_store,
         "created_at": now.isoformat(),
     }
 
@@ -146,6 +160,7 @@ async def admin_list_announcements(_=Depends(current_admin), limit: int = Query(
         out.append({
             "announcement_id": str(a["_id"]),
             "title": a["title"], "message": a["message"], "audience": a["audience"],
+            "audiences": a.get("audiences") or [a.get("audience", "all")],
             "target_user_id": a.get("target_user_id"),
             "recipient_count": a.get("recipient_count", 0),
             "dismissed_count": len(a.get("dismissed_by") or []),
@@ -166,6 +181,7 @@ async def resend_announcement(announcement_id: str, admin=Depends(current_admin)
     body = AnnouncementCreate(
         title=doc["title"], message=doc["message"],
         audience=doc.get("audience", "all"),
+        audiences=doc.get("audiences") or [doc.get("audience", "all")],
         target_user_id=doc.get("target_user_id"),
     )
     recipients = await _resolve_recipients(db, body)
@@ -200,6 +216,7 @@ async def resend_announcement(announcement_id: str, admin=Depends(current_admin)
         "announcement_id": ann_id,
         "sent_to": len(recipients),
         "audience": body.audience,
+        "audiences": body.audiences or [body.audience],
         "created_at": now.isoformat(),
     }
 
