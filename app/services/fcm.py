@@ -4,17 +4,29 @@ Initialises the Firebase Admin SDK from a local service-account JSON
 and exposes helpers to send push notifications to individual users or
 broadcast to all users with stored FCM tokens.
 """
-
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from bson import ObjectId
 
+logger = logging.getLogger(__name__)
 _firebase_app = None
 _initialized = False
+
+
+def _safe_oid(uid: str):
+    """Convert a user id string to ObjectId when possible.
+
+    Mongo documents store _id as ObjectId; passing a plain string never
+    matches, which silently broke FCM token lookup (user_not_found).
+    """
+    try:
+        return ObjectId(uid)
+    except Exception:
+        return uid
 
 
 def _get_firebase_app():
@@ -79,7 +91,7 @@ async def send_push_to_user(
         from firebase_admin import messaging
 
         db = get_db()
-        user = await db.users.find_one({"_id": user_id})
+        user = await db.users.find_one({"_id": _safe_oid(user_id)})
         if not user:
             return {"sent": 0, "error": "user_not_found"}
 
@@ -147,7 +159,7 @@ async def send_push_to_user(
         # Remove invalid tokens from DB
         if failed_tokens:
             await db.users.update_one(
-                {"_id": user_id},
+                {"_id": _safe_oid(user_id)},
                 {"$pull": {"fcm_tokens": {"$in": failed_tokens}}},
             )
             logger.info("[FCM] Removed %d invalid tokens for user %s", len(failed_tokens), user_id)
