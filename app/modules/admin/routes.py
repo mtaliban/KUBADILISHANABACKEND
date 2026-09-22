@@ -106,6 +106,8 @@ async def stats(_=Depends(current_admin)):
     users_edu = await db.users.count_documents({"category": "education"})
     users_verified = await db.users.count_documents({"is_verified": True})
     users_active_7d = await db.users.count_documents({"last_seen_at": {"$gte": last7}})
+    users_suspended = await db.users.count_documents({"status": "disabled"})
+    admins_count = await db.users.count_documents({"is_admin": True})
     matches_total = await db.matches.count_documents({})
     matches_24h = await db.matches.count_documents({"matched_at": {"$gte": last24}})
     events_total = await db.event_log.count_documents({})
@@ -137,6 +139,7 @@ async def stats(_=Depends(current_admin)):
     result = {
         "totals": {"users": users_total, "users_health": users_health, "users_education": users_edu,
                    "users_verified": users_verified, "users_active_7d": users_active_7d,
+                   "users_suspended": users_suspended, "admins": admins_count,
                    "matches": matches_total, "matches_24h": matches_24h,
                    "events": events_total, "events_24h": events_24h,
                    "messages": msgs_total, "calls": calls_total},
@@ -151,9 +154,10 @@ async def list_users(_=Depends(current_admin),
                      category: Optional[str] = None,
                      cadre_code: Optional[str] = None, region_id: Optional[int] = None,
                      district_id: Optional[int] = None, facility_id: Optional[str] = None,
-                     subject: Optional[str] = None,
+                     subject: Optional[str] = None, status: Optional[str] = None,
+                     is_admin: Optional[bool] = None,
                      q: Optional[str] = None, limit: int = Query(100, le=500), skip: int = Query(0, ge=0)):
-    cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{district_id or '-'}:{facility_id or '-'}:{subject or '-'}:{q or '-'}:{limit}:{skip}"
+    cache_key = f"admin:users:{category or '-'}:{cadre_code or '-'}:{region_id or '-'}:{district_id or '-'}:{facility_id or '-'}:{subject or '-'}:{status or '-'}:{is_admin}:{q or '-'}:{limit}:{skip}"
     cached_res = await _cache_get(cache_key)
     if cached_res is not None:
         return cached_res
@@ -164,6 +168,8 @@ async def list_users(_=Depends(current_admin),
     if district_id: qd["current_station.district_id"] = district_id
     if facility_id: qd["current_station.facility_id"] = facility_id
     if subject: qd["subjects"] = subject
+    if status: qd["status"] = status
+    if is_admin is not None: qd["is_admin"] = is_admin
     if q: qd["$or"] = [{"full_name": {"$regex": _escape_regex(q), "$options": "i"}}, {"phone_primary": {"$regex": _escape_regex(q)}}, {"phone_alt": {"$regex": _escape_regex(q)}}, {"email": {"$regex": _escape_regex(q), "$options": "i"}}, {"cadre_code": {"$regex": _escape_regex(q), "$options": "i"}}, {"cadre_display": {"$regex": _escape_regex(q), "$options": "i"}}]
     total = await db.users.count_documents(qd)
     cur = db.users.find(qd).sort("created_at", -1).skip(skip).limit(limit)
