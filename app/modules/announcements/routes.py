@@ -22,7 +22,6 @@ router = APIRouter(tags=["announcements"])
 class AnnouncementCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=120)
     message: str = Field(..., min_length=3, max_length=2000)
-    type: str = Field("info", pattern="^(info|warning|success|urgent)$")  # Taarifa | Onyo | Mafanikio | Haraka
     audience: str = "all"  # 'all' | 'user' | code ya idara (k.m. health, education, au mpya)
     audiences: list[str] = Field(default_factory=list)  # multi-select: ['all'] au ['health', 'education'] au ['user']
     target_user_id: Optional[str] = None
@@ -69,7 +68,6 @@ async def send_announcement(body: AnnouncementCreate, admin=Depends(current_admi
     doc = {
         "title": body.title.strip(),
         "message": body.message.strip(),
-        "type": body.type,
         "audience": doc_audience,
         "audiences": aud_store,
         "target_user_id": body.target_user_id,
@@ -153,16 +151,15 @@ async def dismiss_announcement(announcement_id: str, user=Depends(current_user))
 
 
 @router.get("/admin/announcements", tags=["admin"])
-async def admin_list_announcements(_=Depends(current_admin), limit: int = Query(50, le=200), skip: int = Query(0, ge=0)):
+async def admin_list_announcements(_=Depends(current_admin), limit: int = Query(50, le=200)):
     db = get_db()
     total = await db.announcements.count_documents({})
-    cur = db.announcements.find().sort("created_at", -1).skip(skip).limit(limit)
+    cur = db.announcements.find().sort("created_at", -1).limit(limit)
     out = []
     async for a in cur:
         out.append({
             "announcement_id": str(a["_id"]),
             "title": a["title"], "message": a["message"], "audience": a["audience"],
-            "type": a.get("type", "info"),
             "audiences": a.get("audiences") or [a.get("audience", "all")],
             "target_user_id": a.get("target_user_id"),
             "recipient_count": a.get("recipient_count", 0),
@@ -183,7 +180,6 @@ async def resend_announcement(announcement_id: str, admin=Depends(current_admin)
         raise HTTPException(404, "Tangazo halipo")
     body = AnnouncementCreate(
         title=doc["title"], message=doc["message"],
-        type=doc.get("type", "info"),
         audience=doc.get("audience", "all"),
         audiences=doc.get("audiences") or [doc.get("audience", "all")],
         target_user_id=doc.get("target_user_id"),
@@ -193,7 +189,6 @@ async def resend_announcement(announcement_id: str, admin=Depends(current_admin)
     new_doc = {
         "title": body.title,
         "message": body.message,
-        "type": body.type,
         "audience": body.audience,
         "target_user_id": body.target_user_id,
         "recipient_ids": recipients,
