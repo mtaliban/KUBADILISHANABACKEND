@@ -27,6 +27,7 @@ TOPIC_CONTACT_ACTIVITY = "kv/contact/activity"  # call/sms/whatsapp — admin re
 TOPIC_PAYMENT_SUBMITTED = "kv/payment/submitted"  # + "/{user_id}"
 TOPIC_PAYMENT_APPROVED = "kv/payment/approved"    # + "/{user_id}"
 TOPIC_PAYMENT_REJECTED = "kv/payment/rejected"    # + "/{user_id}"
+TOPIC_PAYMENT_REPLY = "kv/payment/reply"          # + "/{user_id}"
 
 # Admin announcements (broadcast to users)
 TOPIC_ANNOUNCEMENT = "kv/announcement"  # + "/{recipient_user_id}"

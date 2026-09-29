@@ -68,12 +68,22 @@ def _get_firebase_app():
         return None
 
 
+def _channel_id_for_type(ntype: str) -> str:
+    """Map notification type to Flutter Android channel id."""
+    if ntype.startswith("payment") or ntype.startswith("feedback") or ntype == "admin.reply":
+        return "kubadilishana_messages"
+    if ntype.startswith("match") or ntype in ("user.registered", "user.verified"):
+        return "kubadilishana_matches"
+    return "kubadilishana_general"
+
+
 async def send_push_to_user(
     user_id: str,
     title: str,
     body: str,
     data: Optional[dict] = None,
     image: Optional[str] = None,
+    ntype: str = "",
 ) -> dict:
     """Send a push notification to a single user via FCM.
 
@@ -106,6 +116,15 @@ async def send_push_to_user(
             image=image,
         )
 
+        # Merge type into data so Flutter reads it on tap
+        merged_data = dict(data or {})
+        if ntype:
+            merged_data.setdefault("type", ntype)
+        # Convert all values to strings (FCM requirement)
+        str_data = {k: str(v) for k, v in merged_data.items()}
+
+        channel_id = _channel_id_for_type(ntype)
+
         # Android config
         android_config = messaging.AndroidConfig(
             priority="high",
@@ -114,7 +133,9 @@ async def send_push_to_user(
                 body=body,
                 image=image,
                 click_action="FLUTTER_NOTIFICATION_CLICK",
-                channel_id="kubadilishana",
+                channel_id=channel_id,
+                default_sound=True,
+                default_vibrate_timings=True,
             ),
         )
 
@@ -142,7 +163,7 @@ async def send_push_to_user(
                     android=android_config,
                     apns=apns_config,
                     token=token,
-                    data=data or {},
+                    data=str_data,
                 )
                 for token in batch_tokens
             ]

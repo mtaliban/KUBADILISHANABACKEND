@@ -139,11 +139,11 @@ def _push_batch_to_users(batch: list[tuple[dict, str]]) -> None:
         logger.exception(f"WS push failed: {e}")
 
 
-def _fcm_push(user_id: str, title: str, body: str, data: dict | None = None) -> None:
+def _fcm_push(user_id: str, title: str, body: str, data: dict | None = None, ntype: str = "") -> None:
     """Send FCM push notification (from a background thread)."""
     import asyncio
     async def _send():
-        await send_push_to_user(user_id, title, body, data)
+        await send_push_to_user(user_id, title, body, data, ntype=ntype)
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(_send())
@@ -412,12 +412,10 @@ def _generate_notifications(msg, client: mqtt.Client) -> None:
                 "title": title, "body": body, "data": data,
                 "occurred_at": doc["created_at"].isoformat(),
             }
-            # NOTE: no more MQTT publish here — the browser listens on the
-            # authenticated WebSocket (see useLiveEvents). Publishing these
-            # to MQTT too would just duplicate traffic on our own broker.
             ws_batch.append((notif_payload, uid))
             # FCM push — notify mtumiaji kwa phone yake (push notification)
-            _fcm_push(uid, title, body, data)
+            # ntype inapelekwa ili FCM itumie channel sahihi (kubadilishana_matches etc.)
+            _fcm_push(uid, title, body, data, ntype=ntype)
     if ws_batch:
         _push_batch_to_users(ws_batch)
 

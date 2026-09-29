@@ -23,6 +23,7 @@ from ...db import get_db
 from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_PAYMENT_SUBMITTED, TOPIC_PAYMENT_APPROVED, TOPIC_PAYMENT_REJECTED,
+    TOPIC_PAYMENT_REPLY,
 )
 from ...security import current_user, current_admin, normalize_phone
 from .schemas import DonateRequest, DonateResponse, AdminReviewRequest, PaymentMessageRequest, PaymentReplyRequest
@@ -242,18 +243,33 @@ async def customer_message(order_id: str, body: PaymentMessageRequest,
         {"_id": order_id},
         {"$push": {"messages": msg}},
     )
-    # Notify admin — malipo yana ujumbe mpya
+    # Notify admin — malipo yana ujumbe mpya (WS + FCM + DB)
     from ..messaging.ws_manager import manager as ws_manager
+    from ...services.fcm import send_push_to_user as fcm_push
     admin_ids = [str(a["_id"]) async for a in db.users.find({"is_admin": True}, {"_id": 1})]
+    notif_title = f"Ujumbe kuhusu malipo"
+    notif_body = body.message.strip()[:120]
+    notif_data = {"order_id": order_id, "type": "payment.message"}
     for aid in admin_ids:
+        notif_doc = {
+            "user_id": aid, "type": "payment.message",
+            "title": notif_title, "body": notif_body,
+            "data": notif_data, "read": False, "created_at": now,
+        }
+        ins = await db.notifications.insert_one(notif_doc)
         await ws_manager.send_to_user(aid, {
             "event": "notification",
+            "notification_id": str(ins.inserted_id),
             "type": "payment.message",
-            "title": f"Ujumbe kuhusu malipo — {order['order_id']}",
-            "body": body.message.strip()[:120],
-            "data": {"order_id": order_id},
+            "title": notif_title,
+            "body": notif_body,
+            "data": notif_data,
             "occurred_at": now.isoformat(),
         })
+        try:
+            await fcm_push(aid, notif_title, notif_body, notif_data, ntype="payment.message")
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -277,18 +293,33 @@ async def admin_reply(order_id: str, body: PaymentReplyRequest,
         {"_id": order_id},
         {"$push": {"messages": msg}},
     )
-    # Notify customer — admin amejibu
+    # Notify customer — admin amejibu (WS + FCM + DB)
     uid = str(order["user_id"])
     from ..messaging.ws_manager import manager as ws_manager
+    from ...services.fcm import send_push_to_user as fcm_push
+    notif_title = "Admin amejibu kuhusu malipo yako"
+    notif_body = body.reply.strip()[:120]
+    notif_data = {"order_id": order_id, "type": "payment.reply"}
+    notif_doc = {
+        "user_id": uid, "type": "payment.reply",
+        "title": notif_title, "body": notif_body,
+        "data": notif_data, "read": False, "created_at": now,
+    }
+    ins = await db.notifications.insert_one(notif_doc)
     await ws_manager.send_to_user(uid, {
         "event": "notification",
+        "notification_id": str(ins.inserted_id),
         "type": "payment.reply",
-        "title": "Admin amejibu kuhusu malipo yako",
-        "body": body.reply.strip()[:120],
-        "data": {"order_id": order_id},
+        "title": notif_title,
+        "body": notif_body,
+        "data": notif_data,
         "occurred_at": now.isoformat(),
     })
-    publish(f"{TOPIC_PAYMENT_REJECTED}/{uid}", {
+    try:
+        await fcm_push(uid, notif_title, notif_body, notif_data, ntype="payment.reply")
+    except Exception:
+        pass
+    publish(f"{TOPIC_PAYMENT_REPLY}/{uid}", {
         "event": "payment.reply", "order_id": order_id,
         "occurred_at": now.isoformat(),
     })

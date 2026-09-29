@@ -62,19 +62,20 @@ async def submit_feedback(body: FeedbackCreate, user=Depends(current_user)):
     }
     r = await db.feedback.insert_one(doc)
     fid = str(r.inserted_id)
-    # Real-time: admin anajulishwa PAPO HAPO (WS) — maoni mapya yanaonekana
-    # kwenye page ya admin bila refresh. Pia tunahifadhi kwenye DB ili admin
-    # apate badge ya unread hata akiwa offline (kama malipo).
-    from datetime import timezone as _tz
+    # Real-time: admin anajulishwa PAPO HAPO (WS + FCM) — maoni mapya yanaonekana
+    # kwenye page ya admin bila refresh. FCM inawafika hata wakiwa offline.
+    from ...services.fcm import send_push_to_user as fcm_push
     admins = [str(u["_id"]) async for u in db.users.find({"is_admin": True}, {"_id": 1})]
     out = _out(doc)
+    notif_title = "Maoni mapya ya mtumiaji"
     notif_body = f"{doc.get('subject', '')} — {doc.get('user_name', '')}"
+    notif_data = {"feedback_id": fid, "type": "feedback.new"}
     for aid in admins:
         notif_doc = {
             "user_id": aid, "type": "feedback.new",
-            "title": "Maoni mapya ya mtumiaji",
+            "title": notif_title,
             "body": notif_body,
-            "data": {"feedback_id": fid},
+            "data": notif_data,
             "read": False, "created_at": now,
         }
         ins = await db.notifications.insert_one(notif_doc)
@@ -82,12 +83,16 @@ async def submit_feedback(body: FeedbackCreate, user=Depends(current_user)):
             "event": "notification",
             "notification_id": str(ins.inserted_id),
             "type": "feedback.new",
-            "title": "Maoni mapya ya mtumiaji",
+            "title": notif_title,
             "body": notif_body,
-            "data": {"feedback_id": fid},
+            "data": notif_data,
             "feedback": out,
             "occurred_at": now.isoformat(),
         })
+        try:
+            await fcm_push(aid, notif_title, notif_body, notif_data, ntype="feedback.new")
+        except Exception:
+            pass
     return out
 
 
@@ -151,11 +156,15 @@ async def admin_reply(feedback_id: str, body: FeedbackReply, _=Depends(current_a
     )
     # Real-time kwa mtumiaji: jibu linaonekana PAPO HAPO (bila refresh).
     # Pia tunahifadhi kwenye DB ili mtumiaji apate badge ya unread.
+    from ...services.fcm import send_push_to_user as fcm_push
+    notif_title = "Jibu la Admin kwenye maoni yako"
+    notif_body = body.reply.strip()[:120]
+    notif_data = {"feedback_id": feedback_id, "type": "feedback.replied"}
     notif_doc = {
         "user_id": f["user_id"], "type": "feedback.replied",
-        "title": "Jibu la Admin kwenye maoni yako",
-        "body": body.reply.strip()[:120],
-        "data": {"feedback_id": feedback_id},
+        "title": notif_title,
+        "body": notif_body,
+        "data": notif_data,
         "read": False, "created_at": now,
     }
     ins = await db.notifications.insert_one(notif_doc)
@@ -163,13 +172,17 @@ async def admin_reply(feedback_id: str, body: FeedbackReply, _=Depends(current_a
         "event": "notification",
         "notification_id": str(ins.inserted_id),
         "type": "feedback.replied",
-        "title": "Jibu la Admin kwenye maoni yako",
-        "body": body.reply.strip()[:120],
-        "data": {"feedback_id": feedback_id},
+        "title": notif_title,
+        "body": notif_body,
+        "data": notif_data,
         "feedback": _out({**f, "status": "replied", "admin_reply": body.reply.strip(),
                           "admin_replied_at": now}),
         "occurred_at": now.isoformat(),
     })
+    try:
+        await fcm_push(f["user_id"], notif_title, notif_body, notif_data, ntype="feedback.replied")
+    except Exception:
+        pass
     return {"ok": True}
 
 
