@@ -58,6 +58,19 @@ def _get_firebase_app():
             logger.info("[FCM] Firebase Admin SDK initialised from %s", cred_path)
             return _firebase_app
 
+        # 3. Try default relative paths (local dev + direct server deploy)
+        _this_dir = Path(__file__).resolve().parent.parent.parent  # backend root
+        for default_path in [
+            _this_dir / "config" / "firebase-service-account.json",
+            Path("config/firebase-service-account.json"),
+        ]:
+            if default_path.is_file():
+                cred = credentials.Certificate(str(default_path))
+                _firebase_app = firebase_admin.initialize_app(cred)
+                _initialized = True
+                logger.info("[FCM] Firebase Admin SDK initialised from %s", default_path)
+                return _firebase_app
+
         logger.warning("[FCM] No Firebase service account found — push notifications disabled")
         _initialized = True  # Don't retry
         return None
