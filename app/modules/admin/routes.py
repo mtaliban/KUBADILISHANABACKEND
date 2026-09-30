@@ -2921,3 +2921,68 @@ async def toggle_user_contact(user_id: str, admin=Depends(current_admin)):
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     })
     return {"ok": True, "contact_enabled": new_val}
+
+
+# ─── Admin badges (namba za icons) ───────────────────────────────────────────
+
+@router.get("/badges")
+async def admin_badges(admin=Depends(current_admin)):
+    """Idadi za badges kwa kila icon ya admin drawer/bottom nav.
+    Tumia endpoint hii moja badala ya calls nyingi — haraka zaidi."""
+    db = get_db()
+    admin_id = str(admin["_id"])
+
+    # Wakati admin alipokuwa kwenye kila ukurasa mara ya mwisho
+    seen = await db.admin_page_seen.find_one({"admin_id": admin_id}) or {}
+
+    # Payments zinasubiri uidhinishaji
+    payments = await db.payments.count_documents({"status": "verifying"})
+
+    # Feedback yasiyojibiwa
+    feedback = await db.feedback.count_documents({"status": {"$ne": "replied"}})
+
+    # Watumiaji wapya tangu admin alipofungua ukurasa wa Watumiaji
+    last_users = seen.get("users")
+    users_q: dict = {"status": "active", "is_admin": {"$ne": True}}
+    if last_users:
+        users_q["created_at"] = {"$gt": last_users}
+    users = await db.users.count_documents(users_q)
+
+    # Mechi mpya (Waliopata wenzao) tangu admin alipofungua
+    last_matches = seen.get("matches")
+    matches_q: dict = {}
+    if last_matches:
+        matches_q["matched_at"] = {"$gt": last_matches}
+    matches = await db.matches.count_documents(matches_q)
+
+    # Simu/mawasiliano mapya (Waliopigiana) tangu admin alipofungua
+    last_contacts = seen.get("contacts")
+    contacts_q: dict = {}
+    if last_contacts:
+        contacts_q["initiated_at"] = {"$gt": last_contacts}
+    contacts = await db.call_logs.count_documents(contacts_q)
+
+    return {
+        "payments":  payments,
+        "feedback":  feedback,
+        "users":     users,
+        "matches":   matches,
+        "contacts":  contacts,
+    }
+
+
+@router.post("/pages/seen")
+async def admin_mark_page_seen(body: dict, admin=Depends(current_admin)):
+    """Rekodi wakati admin alipofungua ukurasa — namba 'mpya' zinahesabiwa
+    tena kuanzia muda huu."""
+    page = body.get("page", "")
+    allowed = {"users", "matches", "contacts", "matangazo", "takwimu", "data"}
+    if page not in allowed:
+        raise HTTPException(400, f"page lazima iwe mojawapo ya: {', '.join(sorted(allowed))}")
+    db = get_db()
+    await db.admin_page_seen.update_one(
+        {"admin_id": str(admin["_id"])},
+        {"$set": {page: datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True}
