@@ -84,10 +84,10 @@ def _get_firebase_app():
 def _channel_id_for_type(ntype: str) -> str:
     """Map notification type to Flutter Android channel id."""
     if ntype.startswith("payment") or ntype.startswith("feedback") or ntype == "admin.reply":
-        return "kubadilishana_messages"
+        return "kubadilishana_messages_v2"
     if ntype.startswith("match") or ntype in ("user.registered", "user.verified"):
-        return "kubadilishana_matches"
-    return "kubadilishana_general"
+        return "kubadilishana_matches_v2"
+    return "kubadilishana_general_v2"
 
 
 async def send_push_to_user(
