@@ -69,6 +69,6 @@ jobs:
           echo "   → itapata digest mpya → pull + restart backend"
           echo ""
           echo "Thibitisha baada ya dakika 2-3:"
-          echo "   ssh ubuntu@16.171.23.21 'docker ps'"
-          echo "   curl http://16.171.23.21:8000/health"
+          echo "   ssh ubuntu@13.51.176.163 'docker ps'"
+          echo "   curl http://13.51.176.163:8000/health"
           echo "================================================"

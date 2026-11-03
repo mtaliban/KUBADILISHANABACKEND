@@ -5,7 +5,7 @@
 # (A record = public IP ya EC2). Ikikosa, Let's Encrypt haitoi certificate
 # na TLS handshake inakataliwa → API YOTE inashindwa (login "inakataa",
 # register, dashboard... vyote). Kwa sslip.io, domain INAJITENGENEZA kutoka
-# IP: 16.171.23.21 → api.16-171-23-21.sslip.io
+# IP: 13.51.176.163 → api.13-51-176-163.sslip.io
 #
 # Domain inatoka env CADDY_DOMAIN (tazama docker-compose.yml / .env) ili
 # usilazimike ku-edit faili hili kila IP ya EC2 inapobadilika.
@@ -15,6 +15,6 @@
 # majina ya containers (kv_backend) hayarandikiki kwenye host networking.
 # ============================================================
 
-{$CADDY_DOMAIN:api.16-171-23-21.sslip.io} {
+{$CADDY_DOMAIN:api.13-51-176-163.sslip.io} {
 	reverse_proxy {$CADDY_UPSTREAM:127.0.0.1:8000}
 }

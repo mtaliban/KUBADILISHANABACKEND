@@ -39,7 +39,7 @@ fi
 # Kosa la kawaida: certificate ya Caddy haipo/imeisha muda → TLS handshake
 # inakataliwa na API YOTE inashindwa (login "inakataa", register, dashboard).
 # Tunapima TLS pekee (bila kutegemea backend) na kuifanya upya.
-CADDY_DOMAIN="${CADDY_DOMAIN:-api.16-171-23-21.sslip.io}"
+CADDY_DOMAIN="${CADDY_DOMAIN:-api.13-51-176-163.sslip.io}"
 STAMP="/tmp/kv-caddy-fix.stamp"
 
 has_cert() {
