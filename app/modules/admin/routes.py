@@ -20,7 +20,7 @@ from ...db import get_db
 from ...events.publisher import publish
 from ...events.topics import (
     TOPIC_USER_REGISTERED, TOPIC_USER_UPDATED_BY_ADMIN, TOPIC_USER_DELETED,
-    TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED,
+    TOPIC_USER_ADMIN_CHANGED, TOPIC_PAGE_VIEWED, TOPIC_USER_PASSWORD_RESET_REQUESTED,
     TOPIC_DATA_DEPARTMENTS_CHANGED, TOPIC_DATA_SUBJECTS_CHANGED, TOPIC_DATA_CADRES_CHANGED,
     TOPIC_DATA_REGIONS_CHANGED, TOPIC_DATA_DISTRICTS_CHANGED,
     TOPIC_DATA_FACILITIES_CHANGED,
@@ -383,13 +383,15 @@ async def admin_import_users_excel(
         if not name:
             return None
         name_clean = str(name).strip()
-        cat = "education" if category == "education" else "health"
-        f = await db.facilities.find_one({
-            "district_id": district_id, "category": cat,
-            "name": {"$regex": re.escape(name_clean), "$options": "i"}
-        })
-        if f:
-            return {"facility_id": str(f.get("id", f.get("_id"))), "facility_name": f["name"]}
+        name_re = {"$regex": re.escape(name_clean), "$options": "i"}
+        if category == "education":
+            f = await db.schools.find_one({"district_id": district_id, "name": name_re})
+            if f:
+                return {"facility_id": str(f["id"]), "facility_name": f["name"]}
+        else:
+            f = await db.health_facilities.find_one({"district_id": district_id, "name": name_re})
+            if f:
+                return {"facility_id": str(f.get("code", f.get("_id"))), "facility_name": f["name"]}
         return None
 
     for idx, row in enumerate(rows, start=2):

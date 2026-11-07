@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from ...db import get_db
 from ...security import current_user
 from ...cache import get_redis
-from .matching import find_matches_for_user, _station_satisfies_destination, _any_in_region
+from .matching import find_matches_for_user, match_score, _station_satisfies_destination, _any_in_region
 from ..messaging.ws_manager import manager as ws_manager
 
 
